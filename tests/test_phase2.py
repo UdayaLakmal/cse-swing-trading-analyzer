@@ -177,3 +177,62 @@ def test_web_flows(conn, tmp_path, monkeypatch):
     tid = conn.execute("SELECT id FROM trades WHERE symbol = 'COMB.N0000'").fetchone()[0]
     assert "Trade deleted" in c.post(f"/trades/{tid}/delete").text
     assert c.get("/trades/template.xlsx").headers["content-type"].startswith("application/vnd.openxml")
+
+
+# --- broker statement (made-up numbers, same layout as the broker export) ---
+
+STATEMENT_HEADER = [
+    "Security", "Quantity", "Cleared Balance", "Available Balance", "Unsettled Buy", "Unsettled Sell",
+    "Holding % (Quantity)", "Avg Price", "B.E.S Price", "Total Cost", "Traded Price", "Market Value",
+]
+
+
+def statement_xlsx(rows):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Portfolio"
+    ws.append(["Portfolio (ACCOUNT) - EQUITY"])
+    ws.append([])
+    ws.append(STATEMENT_HEADER)
+    for sym, qty, avg in rows:
+        ws.append([sym, qty, qty, qty, 0, 0, 0, avg, 0, qty * avg, 0, 0])
+    ws.append(["Total", None, None, None, None, None, None, None, None, 0])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_statement_becomes_opening_buys(resolver):
+    data = statement_xlsx([("JKH.N0000", 1000, 20.224), ("HNB.N0000", 0, 300), ("NOPE.N0000", 5, 1)])
+    r = parse_xlsx(data, resolver, fee_rate=0.0112, statement_day=TODAY)
+    assert r.kind == "statement"
+    (t,) = r.rows
+    assert (t.day, t.symbol, t.side, t.quantity) == (TODAY, "JKH.N0000", "BUY", 1000)
+    assert t.price == pytest.approx(20.0, abs=1e-4)
+    assert t.quantity * t.price + t.fees == pytest.approx(20224.0, abs=0.01)
+    assert len(r.errors) == 1 and "NOPE" in r.errors[0]
+
+
+def test_statement_preview_never_doubles_holdings(conn, tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("CSE_DB_PATH", str(tmp_path / "t.db"))
+    from cse_analyzer.web import app
+
+    c = TestClient(app)
+    save_trades(conn, [
+        TradeRow(date(2026, 10, 1), "JKH.N0000", "BUY", 1000, 20.0),
+        TradeRow(date(2026, 10, 1), "COMB.N0000", "BUY", 50, 100.0),
+        TradeRow(date(2026, 10, 1), "CALI.U0000", "BUY", 10, 10.0),
+    ], "form")
+    data = statement_xlsx([("JKH.N0000", 1000, 20.2), ("COMB.N0000", 80, 101), ("HNB.N0000", 10, 303)])
+    r = c.post("/trades/upload", files={"file": ("p.xlsx", data)})
+    t = r.text
+    assert "broker holdings statement" in t
+    assert "already held" in t and "held 50 here vs 80 on statement" in t
+    assert "CALI.U0000: the app holds 10" in t
+    assert "Save 1 new trade" in t
+    payload = t.split('name="payload" value="')[1].split('"')[0].replace("&#34;", '"')
+    assert "HNB.N0000" in payload and "JKH" not in payload
+    assert "Saved 1 trades" in c.post("/trades/confirm", data={"payload": payload, "source": "statement"}).text
+    assert conn.execute("SELECT source FROM trades WHERE symbol = 'HNB.N0000'").fetchone()[0] == "statement"

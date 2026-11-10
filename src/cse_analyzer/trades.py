@@ -26,6 +26,7 @@ class TradeRow:
 class ParseResult:
     rows: list[TradeRow] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    kind: str = "trades"  # "trades", or "statement" for a broker holdings snapshot
 
 
 # --- symbols ---------------------------------------------------------------
@@ -153,7 +154,29 @@ def xlsx_template() -> bytes:
     return buf.getvalue()
 
 
-def parse_xlsx(data: bytes, resolver: SymbolResolver) -> ParseResult:
+STATEMENT_NOTE = "Opening balance from broker statement"
+
+
+def _header(row) -> list[str]:
+    return [str(c).strip().lower() if c is not None else "" for c in row]
+
+
+def _is_statement_header(h: list[str]) -> bool:
+    return {"security", "quantity", "avg price"} <= set(h)
+
+
+def parse_xlsx(
+    data: bytes,
+    resolver: SymbolResolver,
+    *,
+    fee_rate: float = 0.0112,
+    statement_day: date | None = None,
+) -> ParseResult:
+    """Read either the app's trade template or a broker holdings statement.
+
+    A statement (columns Security, Quantity, Avg Price, optionally Total Cost)
+    becomes one opening BUY per stock dated `statement_day`.
+    """
     result = ParseResult()
     try:
         ws = load_workbook(io.BytesIO(data), read_only=True, data_only=True).worksheets[0]
@@ -161,8 +184,14 @@ def parse_xlsx(data: bytes, resolver: SymbolResolver) -> ParseResult:
         result.errors.append(f"could not read the file as .xlsx: {e}")
         return result
 
-    rows = ws.iter_rows(values_only=True)
-    header = [str(c).strip().lower() if c is not None else "" for c in next(rows, [])]
+    all_rows = [r for r in ws.iter_rows(values_only=True) if any(v not in (None, "") for v in r)]
+    # Broker statements have a title line above the header; look a few rows down.
+    for i, r in enumerate(all_rows[:10]):
+        if _is_statement_header(_header(r)):
+            return _parse_statement(all_rows[i:], resolver, fee_rate, statement_day or date.today())
+
+    rows = iter(all_rows)
+    header = _header(next(rows, []))
     idx = {name: header.index(name.lower()) for name in XLSX_COLUMNS if name.lower() in header}
     missing = [c for c in XLSX_COLUMNS[:5] if c not in idx]
     if missing:
@@ -206,6 +235,44 @@ def parse_xlsx(data: bytes, resolver: SymbolResolver) -> ParseResult:
             )
         except (ValueError, TypeError) as e:
             result.errors.append(f"row {n}: {e}")
+    return result
+
+
+def _parse_statement(rows: list, resolver: SymbolResolver, fee_rate: float, day: date) -> ParseResult:
+    """Broker 'Portfolio' sheet -> opening BUYs.
+
+    The broker's Avg Price includes buy fees (Quantity x Avg Price = Total
+    Cost), so the price paid is Avg Price / (1 + fee rate) and the fees are the
+    rest of Total Cost. That keeps the cost basis exactly the broker's.
+    """
+    result = ParseResult(kind="statement")
+    h = _header(rows[0])
+    sec, qty_i, avg_i = h.index("security"), h.index("quantity"), h.index("avg price")
+    cost_i = h.index("total cost") if "total cost" in h else None
+
+    for r in rows[1:]:
+        raw_sym = str(r[sec] or "").strip()
+        if not raw_sym or raw_sym.lower() == "total":
+            continue
+        try:
+            symbol = resolver.resolve(raw_sym)
+            if not symbol:
+                raise ValueError(f"unknown symbol {raw_sym!r}")
+            qty = float(r[qty_i])
+            if qty == 0:
+                continue
+            if qty != int(qty) or qty < 0:
+                raise ValueError("Quantity must be a whole number above 0")
+            avg = float(r[avg_i])
+            if avg <= 0:
+                raise ValueError("Avg Price must be above 0")
+            qty = int(qty)
+            price = round(avg / (1 + fee_rate), 4)
+            total = float(r[cost_i]) if cost_i is not None and r[cost_i] not in (None, "") else qty * avg
+            fees = round(total - qty * price, 2)
+            result.rows.append(TradeRow(day, symbol, "BUY", qty, price, max(fees, 0.0), STATEMENT_NOTE))
+        except (ValueError, TypeError, IndexError) as e:
+            result.errors.append(f"{raw_sym}: {e}")
     return result
 
 

@@ -116,8 +116,12 @@ def paste_preview(request: Request, text: str = Form(...), conn=Depends(get_conn
 
 @app.post("/trades/upload", response_class=HTMLResponse)
 async def upload_preview(request: Request, file: UploadFile = File(...), conn=Depends(get_conn)):
-    result = parse_xlsx(await file.read(), SymbolResolver.from_db(conn))
-    return _preview(request, conn, result, "xlsx")
+    fee_rate = float(conn.execute("SELECT value FROM settings WHERE key = 'fee_rate_pct'").fetchone()[0]) / 100
+    result = parse_xlsx(
+        await file.read(), SymbolResolver.from_db(conn),
+        fee_rate=fee_rate, statement_day=collector.now_colombo().date(),
+    )
+    return _preview(request, conn, result, "statement" if result.kind == "statement" else "xlsx")
 
 
 def _preview(request, conn, result, source):
@@ -125,13 +129,33 @@ def _preview(request, conn, result, source):
         (r["day"], r["symbol"], r["side"], r["quantity"], r["price"])
         for r in conn.execute("SELECT day, symbol, side, quantity, price FROM trades")
     }
-    rows = [
-        {**r.__dict__, "day": r.day.isoformat(),
-         "duplicate": (r.day.isoformat(), r.symbol, r.side, r.quantity, r.price) in existing}
-        for r in result.rows
-    ]
-    payload = json.dumps([{k: v for k, v in r.items() if k != "duplicate"} for r in rows if not r["duplicate"]])
-    return render(request, "preview.html", conn, rows=rows, errors=result.errors, payload=payload, source=source)
+    held = {h.symbol: h.quantity for h in build_portfolio(conn).holdings}
+    notes = []
+    rows = []
+    for r in result.rows:
+        row = {**r.__dict__, "day": r.day.isoformat(), "include": True, "status": "new"}
+        if (row["day"], r.symbol, r.side, r.quantity, r.price) in existing:
+            row.update(include=False, status="already saved")
+        elif result.kind == "statement" and r.symbol in held:
+            # A statement is a snapshot, not a trade: never add on top of a
+            # position the app already tracks.
+            have = held[r.symbol]
+            row.update(include=False, status="already held" if have == r.quantity
+                       else f"held {have:,} here vs {r.quantity:,} on statement")
+            if have != r.quantity:
+                notes.append(f"{r.symbol}: the app has {have:,} shares, the statement {r.quantity:,}. "
+                             "Add the buys or sells that explain the difference on the Trades page.")
+        rows.append(row)
+    if result.kind == "statement":
+        on_statement = {r.symbol for r in result.rows}
+        for sym, q in sorted(held.items()):
+            if sym not in on_statement:
+                notes.append(f"{sym}: the app holds {q:,} but it is not on the statement. Add the sell if you sold it.")
+
+    keep = ("day", "symbol", "side", "quantity", "price", "fees", "note")
+    payload = json.dumps([{k: r[k] for k in keep} for r in rows if r["include"]])
+    return render(request, "preview.html", conn, rows=rows, errors=result.errors, notes=notes,
+                  payload=payload, source=source, kind=result.kind)
 
 
 @app.post("/trades/confirm")
@@ -141,7 +165,7 @@ def confirm(payload: str = Form(...), source: str = Form(...), conn=Depends(get_
                  float(r["price"]), r.get("fees"), r.get("note"))
         for r in json.loads(payload)
     ]
-    added, skipped = save_trades(conn, rows, source if source in ("paste", "xlsx") else "form")
+    added, skipped = save_trades(conn, rows, source if source in ("paste", "xlsx", "statement") else "form")
     return back("/trades", f"Saved {added} trades" + (f", skipped {skipped} duplicates" if skipped else ""))
 
 

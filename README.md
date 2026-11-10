@@ -59,6 +59,13 @@ On the Trades page, any of:
   dates may be `YYYY-MM-DD` or `DD/MM/YYYY`.
 - **.xlsx**: download the template (Date, Symbol, Side, Quantity, Price, Fees, Note).
   Re-uploading the same sheet adds only new rows.
+- **Broker statement**: upload the broker's Portfolio export as it is (columns
+  Security, Quantity, Avg Price, Total Cost). Each stock not already held in the
+  app becomes one opening BUY dated today. The broker's Avg Price includes buy
+  fees, so it is split into price (Avg ÷ 1.0112) and fees, and the cost basis
+  equals the broker's Total Cost. Stocks already held are never added again;
+  the preview flags any quantity that differs from the statement, and any stock
+  the app holds that the statement does not.
 
 Both paste and upload show a preview before anything is saved. Bare tickers
 resolve to the voting share (`JKH` → `JKH.N0000`). Blank fees use the default
