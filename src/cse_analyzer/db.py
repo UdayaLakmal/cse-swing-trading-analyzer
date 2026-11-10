@@ -51,7 +51,23 @@ CREATE TABLE IF NOT EXISTS trades (
 CREATE TABLE IF NOT EXISTS position_settings (
     symbol        TEXT PRIMARY KEY,
     stop_loss_pct REAL,
-    stop_price    REAL                        -- ratcheting stop, only moves up
+    stop_price    REAL,                       -- ratcheting stop, only moves up
+    stop_entry_day TEXT                       -- position the stop belongs to (its first buy day)
+);
+
+-- One row per stock per analysed day: the signal log behind every report.
+CREATE TABLE IF NOT EXISTS signals (
+    day          TEXT NOT NULL,               -- trading day analysed
+    symbol       TEXT NOT NULL,
+    list         TEXT NOT NULL,               -- holding, watch, scan
+    verdict      TEXT NOT NULL,
+    score        INTEGER NOT NULL,
+    close        REAL,
+    stop         REAL,
+    target       REAL,
+    detail_json  TEXT NOT NULL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (day, symbol)
 );
 
 CREATE TABLE IF NOT EXISTS watchlist (
@@ -98,7 +114,13 @@ DEFAULT_SETTINGS = {
     "fee_rate_pct": "1.12",
     "max_weight_pct": "20",
     "min_turnover_lkr": "1000000",
+    "risk_per_trade_pct": "1",
+    "enter_rsi_low": "40",
+    "enter_rsi_high": "60",
 }
+
+# Columns added after a database may already exist: (table, column, type).
+MIGRATIONS = [("position_settings", "stop_entry_day", "TEXT")]
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -110,6 +132,10 @@ def connect(path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
+    for table, col, typ in MIGRATIONS:
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if col not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
     conn.executemany(
         "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", DEFAULT_SETTINGS.items()
     )

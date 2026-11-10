@@ -1,60 +1,65 @@
 {% extends "base.html" %}
-{% set active = 'holdings' %}
+{% from "_macros.html" import badge, sym, chg %}
 {% block title %}Holdings · CSE Analyzer{% endblock %}
 {% block body %}
-<h1>Holdings</h1>
-
-<div class="tiles">
-  <div class="card tile"><div class="k">Market value (LKR)</div><div class="v">{{ pf.market_value|money(0) }}</div></div>
-  <div class="card tile"><div class="k">Cost incl. fees</div><div class="v">{{ pf.cost|money(0) }}</div></div>
-  <div class="card tile"><div class="k">Unrealised P/L, net</div>
-    <div class="v {{ 'pos' if pf.unrealised >= 0 else 'neg' }}">{{ pf.unrealised|signed(0) }}</div></div>
-  <div class="card tile"><div class="k">Realised P/L</div>
-    <div class="v {{ 'pos' if pf.realised_total >= 0 else 'neg' }}">{{ pf.realised_total|signed(0) }}</div></div>
-  <div class="card tile"><div class="k">Fees paid</div><div class="v">{{ pf.fees_paid|money(0) }}</div></div>
+<div class="page-head">
+  <div><h1>Holdings</h1><div class="sub">Cost, break-even, net P/L and stops for each position</div></div>
+  <a class="btn" href="/trades">Record trade</a>
 </div>
 
-{% for w in pf.warnings %}<div class="banner">{{ w }}</div>{% endfor %}
+<div class="kpis">
+  <div class="card kpi"><div class="k">Market value</div><div class="v">{{ pf.market_value|money(0) }}</div></div>
+  <div class="card kpi"><div class="k">Cost incl. fees</div><div class="v">{{ pf.cost|money(0) }}</div></div>
+  <div class="card kpi"><div class="k">Unrealised P/L, net</div><div class="v {{ 'pos' if pf.unrealised >= 0 else 'neg' }}">{{ pf.unrealised|signed(0) }}</div></div>
+  <div class="card kpi"><div class="k">Realised P/L</div><div class="v {{ 'pos' if pf.realised_total >= 0 else 'neg' }}">{{ pf.realised_total|signed(0) }}</div></div>
+  <div class="card kpi"><div class="k">Fees paid</div><div class="v">{{ pf.fees_paid|money(0) }}</div></div>
+</div>
+
+<div class="section">
+{% for w in pf.warnings %}<div class="alert warn">{{ w }}</div>{% endfor %}
 
 {% if pf.holdings %}
-<div class="tablewrap"><table>
+<div class="card table-wrap"><table>
+  <thead><tr>
+    <th class="l">Stock</th><th class="l">Verdict</th><th>Shares</th><th>Avg cost</th><th>Break-even</th><th>Close</th>
+    <th>Value</th><th>P/L net</th><th>Weight</th><th>Stop</th><th>Stop %</th>
+  </tr></thead>
+  <tbody>
+  {% for h in pf.holdings %}{% set s = sigs.get(h.symbol, {}) %}
   <tr>
-    <th>Symbol</th><th>Qty</th><th>Avg cost</th><th>Break-even</th><th>Last close</th>
-    <th>Value</th><th>P/L net</th><th>%</th><th>Weight</th><th>Stop</th><th>Stop %</th>
-  </tr>
-  {% for h in pf.holdings %}
-  <tr>
-    <td><strong>{{ h.symbol }}</strong><br><span class="muted">{{ h.name }} · since {{ h.first_day }}</span></td>
+    <td class="l">{{ sym(h.symbol, h.name) }}<div class="small faint">since {{ h.first_day }}</div></td>
+    <td class="l">{{ badge(s.verdict) }}</td>
     <td>{{ h.quantity|money(0) }}</td>
     <td>{{ h.avg_cost|money }}</td>
     <td>{{ h.break_even|money }}</td>
-    <td>{{ h.last_close|money }}<br><span class="muted">{{ h.last_day or '' }}</span></td>
+    <td>{{ h.last_close|money }}<div class="small faint">{{ h.last_day or '' }}</div></td>
     <td>{{ h.market_value|money(0) }}</td>
-    <td class="{{ 'pos' if (h.unrealised or 0) >= 0 else 'neg' }}">{{ h.unrealised|signed(0) }}</td>
-    <td class="{{ 'pos' if (h.unrealised_pct or 0) >= 0 else 'neg' }}">{{ h.unrealised_pct|signed(1) }}</td>
-    <td>{{ h.weight_pct|money(1) }}%</td>
-    <td>{{ h.effective_stop|money }}{% if h.below_stop %}<br><span class="tag neg">below stop</span>{% endif %}</td>
+    <td><span class="{{ 'pos' if (h.unrealised or 0) >= 0 else 'neg' }}">{{ h.unrealised|signed(0) }}</span><div class="small">{{ chg(h.unrealised_pct, 1) }}</div></td>
+    <td><span class="{{ 'neg' if h.weight_pct and h.weight_pct > 20 else '' }}">{{ h.weight_pct|money(1) }}%</span></td>
+    <td>{{ (s.stop or h.effective_stop)|money }}<div class="small muted">{{ s.stop_stage or 'initial' }}</div></td>
     <td>
-      <form class="inline" method="post" action="/holdings/{{ h.symbol }}/stop">
+      <form class="inline" method="post" action="/holdings/{{ h.symbol }}/stop" style="display:inline-flex; gap:4px; align-items:center">
         <input class="small" name="stop_loss_pct" value="{{ '%g'|format(h.stop_loss_pct) }}" aria-label="Stop-loss % for {{ h.symbol }}">
-        <button class="link">set</button>
+        <button class="btn secondary sm">Set</button>
       </form>
     </td>
   </tr>
   {% endfor %}
+  </tbody>
 </table></div>
-<p class="muted">P/L is after buy fees and the fees you would pay to sell today. Stop is entry price minus the stop %; trailing stops arrive with the daily analysis.</p>
+<p class="small muted">P/L is after buy fees and the fees you would pay to sell today. The stop starts at your entry minus the stop %, moves to break-even once the gain reaches 1R, then trails the highest close by 3 ATRs. It never moves down. Changing the stop % restarts it.</p>
 {% else %}
-<div class="card">No holdings yet. <a href="/trades">Add your trades</a> to see positions and P/L here.</div>
+<div class="card empty"><b>No holdings yet</b><a href="/trades">Add your trades</a> or upload your broker statement.</div>
 {% endif %}
+</div>
 
 {% if pf.realised %}
-<h2>Realised P/L by stock</h2>
-<div class="tablewrap"><table>
-  <tr><th>Symbol</th><th>Realised (LKR)</th></tr>
-  {% for sym, v in pf.realised|dictsort %}
-  <tr><td>{{ sym }}</td><td class="{{ 'pos' if v >= 0 else 'neg' }}">{{ v|signed(0) }}</td></tr>
-  {% endfor %}
-</table></div>
+<div class="section">
+  <div class="section-head"><h2>Realised P/L by stock</h2></div>
+  <div class="card table-wrap" style="max-width:420px"><table>
+    <thead><tr><th class="l">Stock</th><th>Realised (LKR)</th></tr></thead>
+    <tbody>{% for s, v in pf.realised|dictsort %}<tr><td class="l"><a class="sym" href="/stock/{{ s }}">{{ s }}</a></td><td class="{{ 'pos' if v >= 0 else 'neg' }}">{{ v|signed(0) }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
 {% endif %}
 {% endblock %}

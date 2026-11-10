@@ -11,7 +11,7 @@ Decision support only; it never places trades.
 |---|---|
 | 1. Data probe + 1-year backfill | Done |
 | 2. Core app: trade import, holdings, P/L | Done |
-| 3. Daily technical analysis + report | Not started |
+| 3. Daily technical analysis + report | Done |
 | 4. systemd timer + desktop notification | Not started |
 | 5. Weekly fundamentals and news | Announcements stored; scoring not started |
 | 6. Backtest, signal log, regime filter, AI summary | Not started |
@@ -22,7 +22,8 @@ Decision support only; it never places trades.
 export UID GID=$(id -g)
 docker compose build
 docker compose run --rm job backfill   # first time: ~1 year of history, ~4 min
-docker compose run --rm job daily      # skips if today already ran; --force to rerun
+docker compose run --rm job daily      # fetch + analyse; skips if today already ran; --force to rerun
+docker compose run --rm job analyze    # re-score stored prices only (seconds)
 docker compose run --rm job status
 docker compose up -d web               # http://localhost:8080
 ```
@@ -44,10 +45,37 @@ see [docs/cse-api.md](docs/cse-api.md).
 - `src/cse_analyzer/cse_client.py` – cse.lk API client and parsers
 - `src/cse_analyzer/collector.py` – fetch + store, catch-up guard, staleness check
 - `src/cse_analyzer/db.py` – SQLite schema and default settings (10% stop, 3x ATR trail, 1.12% fees…)
-- `src/cse_analyzer/cli.py` – `cse backfill | daily | status`
+- `src/cse_analyzer/cli.py` – `cse backfill | daily | analyze | status`
 - `src/cse_analyzer/trades.py` – symbol matching, paste and .xlsx parsing, duplicate-safe saving
 - `src/cse_analyzer/portfolio.py` – holdings, average cost, net P/L, break-even, stops, weights
-- `src/cse_analyzer/web.py` + `templates/` – Holdings, Trades and Watchlist pages
+- `src/cse_analyzer/indicators.py` – moving averages, RSI, MACD, ATR (pandas only)
+- `src/cse_analyzer/analysis.py` – score, verdicts, trailing stops, regime filter, signal log
+- `src/cse_analyzer/charts.py` – server-side SVG charts (work offline)
+- `src/cse_analyzer/web.py` + `templates/` – Today, Holdings, Watchlist, Market scan, stock pages, Trades, Settings
+
+## How the analysis works
+
+Each stock gets a score from -100 to +100 built from visible rules: trend
+(price vs 20/50/200-day averages, 50 vs 200), momentum (RSI 14, MACD), volume
+(big up or down days), relative strength vs the ASPI over 1 and 3 months, and
+levels (52-week high/low, 20-day breakouts). The stock page lists every rule
+and its points.
+
+| List | Verdicts | Rule |
+|---|---|---|
+| Holdings | Sell | Close below the stop |
+| | Trim | Reached +2R and no partial sale yet, or above the max weight |
+| | Add | Score ≥ 40, in profit, market uptrend, liquid |
+| | Hold | Otherwise |
+| Watchlist and scan | Avoid | Thin turnover, long-term downtrend, or score ≤ -20 |
+| | Enter | Above the 50-day, RSI in the entry zone, volume at or above normal, market uptrend |
+| | Wait | Otherwise (the page says what is missing) |
+
+Stops: entry minus the stop % (default 10%); after +1R the stop moves to
+break-even plus fees, then trails the highest close since entry by 3x ATR(14).
+The stop is stored and never moves down. Enter signals are muted to Wait when
+the ASPI is below its 200-day average. Every number above is editable on the
+Settings page, and every daily verdict is kept in the `signals` table.
 
 ## Entering trades
 

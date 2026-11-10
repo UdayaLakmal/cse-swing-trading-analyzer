@@ -1,37 +1,46 @@
 {% extends "base.html" %}
-{% set active = 'watchlist' %}
+{% from "_macros.html" import badge, score, sym, chg %}
 {% block title %}Watchlist · CSE Analyzer{% endblock %}
 {% block body %}
-<h1>Watchlist</h1>
+<div class="page-head">
+  <div><h1>Watchlist</h1><div class="sub">Enter / Wait / Avoid calls for stocks you are watching</div></div>
+</div>
 
-<div class="card">
+<div class="card pad">
   <form method="post" action="/watchlist/add">
     <div class="fields">
-      <div><label for="symbol">Symbol</label><input id="symbol" name="symbol" list="symbols" placeholder="HNB" required></div>
-      <div><label for="target_entry">Target entry price</label><input id="target_entry" type="number" name="target_entry" min="0" step="0.01"></div>
-      <div style="grid-column: span 2"><label for="note">Note</label><input id="note" name="note"></div>
+      <div><label for="symbol">Stock</label><input id="symbol" name="symbol" list="symbols" placeholder="e.g. HNB" required></div>
+      <div><label for="target_entry">Target entry price (optional)</label><input id="target_entry" type="number" name="target_entry" min="0" step="0.01"></div>
+      <div style="grid-column: span 2"><label for="note">Note (optional)</label><input id="note" name="note" placeholder="Why you are watching it"></div>
     </div>
-    <button>Add or update</button>
+    <button class="btn">Add or update</button>
   </form>
 </div>
 
-<h2>Watching</h2>
+<div class="section">
 {% if items %}
-<div class="tablewrap"><table>
-  <tr><th>Symbol</th><th>Last close</th><th>Target entry</th><th>Gap to target</th><th class="l">Note</th><th class="l">Added</th><th></th></tr>
-  {% for w in items %}
+<div class="card table-wrap"><table>
+  <thead><tr><th class="l">Stock</th><th class="l">Verdict</th><th>Score</th><th class="l">40 days</th><th>Close</th><th>Target entry</th><th>Stop</th><th>Size</th><th class="l">Why</th><th class="l">Note</th><th></th></tr></thead>
+  <tbody>
+  {% for it in items %}{% set w = it.w %}{% set s = it.sig %}
   <tr>
-    <td><strong>{{ w.symbol }}</strong><br><span class="muted">{{ w.name or '' }}</span></td>
+    <td class="l">{{ sym(w.symbol, w.name or '') }}</td>
+    <td class="l">{{ badge(s.verdict) }}</td>
+    <td>{{ score(s.score) }}</td>
+    <td class="l">{{ sparks.get(w.symbol, '') }}</td>
     <td>{{ w.last_close|money }}</td>
-    <td>{{ w.target_entry|money }}</td>
-    <td>{% if w.target_entry and w.last_close %}{{ (100 * (w.last_close - w.target_entry) / w.target_entry)|signed(1) }}%{% else %}–{% endif %}</td>
-    <td class="l">{{ w.note or '' }}</td>
-    <td class="l muted">{{ w.added_at[:10] }}</td>
-    <td><form class="inline" method="post" action="/watchlist/{{ w.symbol }}/delete"><button class="link">remove</button></form></td>
+    <td>{{ w.target_entry|money }}{% if w.target_entry and w.last_close %}<div class="small">{{ chg(100 * (w.last_close - w.target_entry) / w.target_entry, 1) }}</div>{% endif %}</td>
+    <td>{{ s.stop|money }}</td>
+    <td>{{ s.size_shares|money(0) if s.size_shares else '–' }}</td>
+    <td class="l wrap small muted">{{ (s.reasons or [''])[0] }}</td>
+    <td class="l wrap small">{{ w.note or '' }}</td>
+    <td><form class="inline" method="post" action="/watchlist/{{ w.symbol }}/delete"><button class="btn ghost" title="Remove {{ w.symbol }}">Remove</button></form></td>
   </tr>
   {% endfor %}
+  </tbody>
 </table></div>
 {% else %}
-<div class="card muted">Nothing on the watchlist yet. Enter / Wait / Avoid verdicts arrive with the daily analysis.</div>
+<div class="card empty"><b>Nothing on the watchlist yet</b>Add a stock above, or pick ideas from the <a href="/scan">market scan</a>.</div>
 {% endif %}
+</div>
 {% endblock %}

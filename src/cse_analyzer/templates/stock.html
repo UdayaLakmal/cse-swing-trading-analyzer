@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, score, chg %}
+{% block title %}{{ stock.symbol.split('.')[0] }} · CSE Analyzer{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div>
+    <div class="muted small">{{ stock.symbol }}</div>
+    <h1>{{ stock.name }}</h1>
+    <div class="sub" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap">
+      <span style="font-size:20px; font-weight:650; color:var(--text)">{{ f.close|money if f else '–' }}</span>
+      {% if f %}{{ chg(f.change_pct) }}{% endif %}
+      {% if sig %}{{ badge(sig.verdict) }} {{ score(sig.score) }}{% endif %}
+      <span class="faint small">close of {{ f.day or '–' }}</span>
+    </div>
+  </div>
+  <div style="display:flex; gap:8px">
+    {% if watched %}
+    <form method="post" action="/watchlist/{{ stock.symbol }}/delete"><input type="hidden" name="next" value="/stock/{{ stock.symbol }}"><button class="btn secondary">✓ Watching</button></form>
+    {% else %}
+    <form method="post" action="/watchlist/add"><input type="hidden" name="symbol" value="{{ stock.symbol }}"><input type="hidden" name="next" value="/stock/{{ stock.symbol }}"><button class="btn secondary">+ Watchlist</button></form>
+    {% endif %}
+    <a class="btn" href="/trades?symbol={{ stock.symbol }}">Record trade</a>
+  </div>
+</div>
+
+<div class="card pad">
+  <div class="legend" style="margin-bottom:8px">
+    <span><i style="background:var(--accent)"></i>Close</span>
+    <span><i style="background:var(--c1)"></i>50-day</span>
+    <span><i style="background:var(--c2)"></i>200-day</span>
+    {% if sig and sig.stop %}<span><i style="background:var(--sell)"></i>Stop</span>{% endif %}
+    {% if sig and sig.target %}<span><i style="background:var(--buy)"></i>Target</span>{% endif %}
+    {% if holding %}<span><i style="background:var(--muted)"></i>Your entry</span>{% endif %}
+  </div>
+  {{ chart }}
+</div>
+
+<div class="grid2 section">
+  <div class="card pad">
+    <h2 style="margin-bottom:10px">Verdict{% if sig %}: {{ sig.verdict }}{% endif %}</h2>
+    {% if sig %}
+    <ul class="reasons">{% for r in sig.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+    <div class="stats" style="margin-top:14px">
+      <div><div class="k">{{ (sig.stop_stage or 'stop')|capitalize }} stop</div><div class="v">{{ sig.stop|money }}</div></div>
+      <div><div class="k">Target</div><div class="v">{{ sig.target|money }}</div></div>
+      {% if sig.size_shares %}<div><div class="k">Suggested size</div><div class="v">{{ sig.size_shares|money(0) }} sh</div>
+        <div class="small muted">{{ settings.risk_per_trade_pct|round(2) }}% risk of capital</div></div>{% endif %}
+    </div>
+    {% else %}<p class="muted">Not analysed: fewer than 30 days of prices.</p>{% endif %}
+  </div>
+
+  <div class="card pad">
+    <h2 style="margin-bottom:6px">Why the score is {{ '%+d'|format(sig.score) if sig else '–' }}</h2>
+    <p class="small muted" style="margin-top:0">Each rule adds or subtracts points; the total runs from -100 to +100.</p>
+    {% for group, comps in groups.items() %}
+    <div class="small faint" style="margin-top:8px; text-transform:uppercase; letter-spacing:.04em; font-weight:600">{{ group }}</div>
+    {% for c in comps %}
+    <div class="comp"><span>{{ c.reason }}</span><span class="pts {{ 'pos' if c.points > 0 else ('neg' if c.points < 0 else 'muted') }}">{{ '%+d'|format(c.points) }}</span></div>
+    {% endfor %}
+    {% endfor %}
+  </div>
+</div>
+
+{% if f %}
+<div class="section">
+  <div class="section-head"><h2>Key numbers</h2></div>
+  <div class="stats">
+    <div><div class="k">RSI (14)</div><div class="v">{{ f.rsi|money(0) }}</div></div>
+    <div><div class="k">ATR (14)</div><div class="v">{{ f.atr|money }}</div><div class="small muted">{{ (100 * f.atr / f.close)|money(1) if f.atr else '–' }}% of price</div></div>
+    <div><div class="k">20 / 50 / 200-day</div><div class="v small">{{ f.ma20|money }} / {{ f.ma50|money }} / {{ f.ma200|money }}</div></div>
+    <div><div class="k">Volume vs 20-day avg</div><div class="v">{{ f.vol_ratio|money(1) if f.vol_ratio else '–' }}x</div></div>
+    <div><div class="k">Avg daily turnover</div><div class="v">LKR {{ f.turnover20|compact }}</div></div>
+    <div><div class="k">vs ASPI 1m / 3m</div><div class="v small">{{ chg(f.rs1m, 1) }} / {{ chg(f.rs3m, 1) }}</div></div>
+    <div style="grid-column: span 2"><div class="k">52-week range</div>
+      <div class="range"><i style="left: {{ (100 * (f.close - f.lo52) / ((f.hi52 - f.lo52) or 1))|round(1) }}%"></i></div>
+      <div class="small muted" style="display:flex; justify-content:space-between"><span>{{ f.lo52|money }}</span><span>{{ f.hi52|money }}</span></div></div>
+  </div>
+</div>
+{% endif %}
+
+{% if holding %}
+<div class="section">
+  <div class="section-head"><h2>Your position</h2><a class="hint" href="/holdings">Change stop % →</a></div>
+  <div class="stats">
+    <div><div class="k">Shares</div><div class="v">{{ holding.quantity|money(0) }}</div></div>
+    <div><div class="k">Avg cost incl. fees</div><div class="v">{{ holding.avg_cost|money }}</div></div>
+    <div><div class="k">Break-even</div><div class="v">{{ holding.break_even|money }}</div></div>
+    <div><div class="k">Value</div><div class="v">{{ holding.market_value|money(0) }}</div></div>
+    <div><div class="k">P/L net</div><div class="v {{ 'pos' if (holding.unrealised or 0) >= 0 else 'neg' }}">{{ holding.unrealised|signed(0) }}</div><div class="small">{{ chg(holding.unrealised_pct, 1) }}</div></div>
+    <div><div class="k">Held since</div><div class="v">{{ holding.first_day }}</div></div>
+  </div>
+</div>
+{% endif %}
+
+<div class="grid2 section">
+  <div>
+    <div class="section-head"><h2>Announcements</h2></div>
+    <div class="card">
+      {% for n in news %}
+      <div class="comp" style="padding:10px 14px"><span>{% if n.url %}<a href="{{ n.url }}" target="_blank" rel="noopener">{{ n.title }}</a>{% else %}{{ n.title }}{% endif %}</span><span class="small muted">{{ n.announced }}</span></div>
+      {% else %}
+      <div class="empty small">No announcements stored for this company yet.</div>
+      {% endfor %}
+    </div>
+  </div>
+  <div>
+    <div class="section-head"><h2>Your trades</h2></div>
+    <div class="card table-wrap">
+      {% if trades %}
+      <table><thead><tr><th class="l">Date</th><th class="l">Side</th><th>Qty</th><th>Price</th></tr></thead><tbody>
+      {% for t in trades %}<tr><td class="l">{{ t.day }}</td><td class="l {{ 'pos' if t.side == 'BUY' else 'neg' }}">{{ t.side }}</td><td>{{ t.quantity|money(0) }}</td><td>{{ t.price|money }}</td></tr>{% endfor %}
+      </tbody></table>
+      {% else %}<div class="empty small">No trades in this stock.</div>{% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

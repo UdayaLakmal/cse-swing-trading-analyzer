@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Settings · CSE Analyzer{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div><h1>Settings</h1><div class="sub">Your rules. Saving re-scores everything straight away.</div></div>
+</div>
+
+<form method="post" action="/settings">
+  <div class="grid2">
+  {% for section, fields in form %}
+    <div class="card pad">
+      <h2 style="margin-bottom:14px">{{ section }}</h2>
+      {% for key, label, unit, help in fields %}
+      <div style="margin-bottom:14px">
+        <label for="{{ key }}">{{ label }}{% if unit %} <span class="faint">({{ unit }})</span>{% endif %}</label>
+        <input id="{{ key }}" name="{{ key }}" value="{{ values.get(key, '') }}" inputmode="decimal" required style="max-width:200px">
+        {% if help %}<div class="small muted" style="margin-top:4px">{{ help }}</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  {% endfor %}
+  </div>
+  <p style="margin-top:16px"><button class="btn">Save settings</button></p>
+</form>
+{% endblock %}
