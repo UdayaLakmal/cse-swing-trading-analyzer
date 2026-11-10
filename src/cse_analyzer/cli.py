@@ -1,4 +1,4 @@
-"""Command line entry point: `cse backfill`, `cse daily`, `cse status`."""
+"""Command line entry point: `cse backfill | daily | analyze | status | summary`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 import logging
 import sys
 
-from . import analysis, collector, db
+from . import analysis, collector, db, notify
 from .config import load_settings
 from .cse_client import PERIOD_YEAR, CseClient
 
@@ -20,6 +20,7 @@ def main(argv: list[str] | None = None) -> int:
     daily.add_argument("--force", action="store_true", help="Run even if today already succeeded")
     sub.add_parser("analyze", help="Re-run the analysis on stored prices (no fetching)")
     sub.add_parser("status", help="Show what is stored and when it last ran")
+    sub.add_parser("summary", help="Print the desktop notification for the latest analysis (JSON)")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -29,6 +30,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "status":
         print(json.dumps(status(conn), indent=2))
+        return 0
+
+    if args.cmd == "summary":
+        print(json.dumps(notify.build_summary(conn), ensure_ascii=False))
         return 0
 
     if args.cmd == "analyze":

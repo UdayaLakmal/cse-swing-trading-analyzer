@@ -1,0 +1,10 @@
+[Unit]
+Description=CSE Analyzer: daily prices, analysis and notification
+Documentation=file://@REPO@/README.md
+
+[Service]
+Type=oneshot
+ExecStart=@REPO@/scripts/cse-daily.sh
+# Waits up to 15 minutes for Docker and the network, then a few minutes of fetching.
+TimeoutStartSec=45min
+Nice=5
