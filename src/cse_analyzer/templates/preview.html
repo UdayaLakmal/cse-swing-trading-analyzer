@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% set active = 'trades' %}
+{% block title %}Check trades · CSE Analyzer{% endblock %}
+{% block body %}
+<h1>Check before saving</h1>
+
+{% for e in errors %}<div class="banner">Skipped {{ e }}</div>{% endfor %}
+
+{% if rows %}
+<div class="tablewrap"><table>
+  <tr><th>Date</th><th class="l">Symbol</th><th class="l">Side</th><th>Qty</th><th>Price</th><th>Fees</th><th class="l">Note</th><th class="l"></th></tr>
+  {% for r in rows %}
+  <tr class="{{ 'muted' if r.duplicate }}">
+    <td>{{ r.day }}</td><td class="l">{{ r.symbol }}</td>
+    <td class="l {{ 'pos' if r.side == 'BUY' else 'neg' }}">{{ r.side }}</td>
+    <td>{{ r.quantity|money(0) }}</td><td>{{ r.price|money }}</td>
+    <td>{{ r.fees|money if r.fees is not none else 'default' }}</td>
+    <td class="l">{{ r.note or '' }}</td>
+    <td class="l">{% if r.duplicate %}already saved{% else %}new{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+
+<p>
+{% set new = rows|rejectattr('duplicate')|list %}
+{% if new %}
+  <form class="inline" method="post" action="/trades/confirm">
+    <input type="hidden" name="payload" value="{{ payload }}">
+    <input type="hidden" name="source" value="{{ source }}">
+    <button>Save {{ new|length }} new trade{{ 's' if new|length != 1 }}</button>
+  </form>
+{% else %}
+  <span class="muted">Nothing new to save.</span>
+{% endif %}
+  &nbsp;<a href="/trades">Back</a>
+</p>
+{% endblock %}

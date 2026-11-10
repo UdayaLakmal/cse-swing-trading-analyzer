@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}CSE Analyzer{% endblock %}</title>
+<style>
+:root {
+  --bg: #f7f7f5; --surface: #fff; --text: #1d1d1b; --muted: #6b6b66; --border: #e3e3de;
+  --accent: #2563eb; --pos: #15803d; --neg: #b91c1c; --warn-bg: #fef3c7; --warn-text: #78350f;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #161615; --surface: #1f1f1d; --text: #ececea; --muted: #a3a39d; --border: #33332f;
+          --accent: #60a5fa; --pos: #4ade80; --neg: #f87171; --warn-bg: #422006; --warn-text: #fde68a; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+header { background: var(--surface); border-bottom: 1px solid var(--border); }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
+nav { display: flex; gap: 20px; align-items: center; height: 52px; }
+nav strong { margin-right: auto; }
+nav a { color: var(--muted); text-decoration: none; }
+nav a.on { color: var(--text); font-weight: 600; }
+main { padding: 24px 0 48px; }
+h1 { font-size: 22px; margin: 0 0 16px; }
+h2 { font-size: 16px; margin: 28px 0 10px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.banner { padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; background: var(--warn-bg); color: var(--warn-text); }
+.msg { padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; background: var(--surface); border: 1px solid var(--border); }
+.tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+th:first-child, td:first-child, .l { text-align: left; }
+tr:last-child td { border-bottom: 0; }
+.pos { color: var(--pos); } .neg { color: var(--neg); } .muted { color: var(--muted); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.tile .k { font-size: 12px; color: var(--muted); } .tile .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+form.inline { display: inline; }
+label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+input, select, textarea { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 8px; width: 100%; }
+textarea { min-height: 120px; font-family: ui-monospace, monospace; font-size: 13px; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 10px; }
+button { font: inherit; border: 0; border-radius: 6px; padding: 7px 14px; background: var(--accent); color: #fff; cursor: pointer; }
+button.link { background: none; color: var(--muted); padding: 0; text-decoration: underline; }
+input.small { width: 64px; padding: 2px 6px; }
+.tag { font-size: 12px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--border); }
+.tag.neg { border-color: var(--neg); }
+</style>
+</head>
+<body>
+<header><div class="wrap"><nav>
+  <strong>CSE Analyzer</strong>
+  <a href="/" class="{{ 'on' if active == 'holdings' }}">Holdings</a>
+  <a href="/trades" class="{{ 'on' if active == 'trades' }}">Trades</a>
+  <a href="/watchlist" class="{{ 'on' if active == 'watchlist' }}">Watchlist</a>
+</nav></div></header>
+<main class="wrap">
+  {% if stale %}<div class="banner">Prices may be stale: newest stored close is {{ latest_day or 'none' }}. Run <code>docker compose run --rm job daily</code>.</div>{% endif %}
+  {% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
+  {% block body %}{% endblock %}
+</main>
+<datalist id="symbols">{% for s in symbols %}<option value="{{ s }}">{% endfor %}</datalist>
+</body>
+</html>

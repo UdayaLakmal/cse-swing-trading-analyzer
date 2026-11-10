@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% set active = 'holdings' %}
+{% block title %}Holdings · CSE Analyzer{% endblock %}
+{% block body %}
+<h1>Holdings</h1>
+
+<div class="tiles">
+  <div class="card tile"><div class="k">Market value (LKR)</div><div class="v">{{ pf.market_value|money(0) }}</div></div>
+  <div class="card tile"><div class="k">Cost incl. fees</div><div class="v">{{ pf.cost|money(0) }}</div></div>
+  <div class="card tile"><div class="k">Unrealised P/L, net</div>
+    <div class="v {{ 'pos' if pf.unrealised >= 0 else 'neg' }}">{{ pf.unrealised|signed(0) }}</div></div>
+  <div class="card tile"><div class="k">Realised P/L</div>
+    <div class="v {{ 'pos' if pf.realised_total >= 0 else 'neg' }}">{{ pf.realised_total|signed(0) }}</div></div>
+  <div class="card tile"><div class="k">Fees paid</div><div class="v">{{ pf.fees_paid|money(0) }}</div></div>
+</div>
+
+{% for w in pf.warnings %}<div class="banner">{{ w }}</div>{% endfor %}
+
+{% if pf.holdings %}
+<div class="tablewrap"><table>
+  <tr>
+    <th>Symbol</th><th>Qty</th><th>Avg cost</th><th>Break-even</th><th>Last close</th>
+    <th>Value</th><th>P/L net</th><th>%</th><th>Weight</th><th>Stop</th><th>Stop %</th>
+  </tr>
+  {% for h in pf.holdings %}
+  <tr>
+    <td><strong>{{ h.symbol }}</strong><br><span class="muted">{{ h.name }} · since {{ h.first_day }}</span></td>
+    <td>{{ h.quantity|money(0) }}</td>
+    <td>{{ h.avg_cost|money }}</td>
+    <td>{{ h.break_even|money }}</td>
+    <td>{{ h.last_close|money }}<br><span class="muted">{{ h.last_day or '' }}</span></td>
+    <td>{{ h.market_value|money(0) }}</td>
+    <td class="{{ 'pos' if (h.unrealised or 0) >= 0 else 'neg' }}">{{ h.unrealised|signed(0) }}</td>
+    <td class="{{ 'pos' if (h.unrealised_pct or 0) >= 0 else 'neg' }}">{{ h.unrealised_pct|signed(1) }}</td>
+    <td>{{ h.weight_pct|money(1) }}%</td>
+    <td>{{ h.effective_stop|money }}{% if h.below_stop %}<br><span class="tag neg">below stop</span>{% endif %}</td>
+    <td>
+      <form class="inline" method="post" action="/holdings/{{ h.symbol }}/stop">
+        <input class="small" name="stop_loss_pct" value="{{ '%g'|format(h.stop_loss_pct) }}" aria-label="Stop-loss % for {{ h.symbol }}">
+        <button class="link">set</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table></div>
+<p class="muted">P/L is after buy fees and the fees you would pay to sell today. Stop is entry price minus the stop %; trailing stops arrive with the daily analysis.</p>
+{% else %}
+<div class="card">No holdings yet. <a href="/trades">Add your trades</a> to see positions and P/L here.</div>
+{% endif %}
+
+{% if pf.realised %}
+<h2>Realised P/L by stock</h2>
+<div class="tablewrap"><table>
+  <tr><th>Symbol</th><th>Realised (LKR)</th></tr>
+  {% for sym, v in pf.realised|dictsort %}
+  <tr><td>{{ sym }}</td><td class="{{ 'pos' if v >= 0 else 'neg' }}">{{ v|signed(0) }}</td></tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% set active = 'trades' %}
+{% block title %}Trades · CSE Analyzer{% endblock %}
+{% block body %}
+<h1>Trades</h1>
+
+<div class="grid2">
+  <div class="card">
+    <h2 style="margin-top:0">Add a trade</h2>
+    <form method="post" action="/trades/add">
+      <div class="fields">
+        <div><label for="day">Date</label><input id="day" type="date" name="day" value="{{ today }}" required></div>
+        <div><label for="symbol">Symbol</label><input id="symbol" name="symbol" list="symbols" placeholder="JKH" required></div>
+        <div><label for="side">Side</label><select id="side" name="side"><option>BUY</option><option>SELL</option></select></div>
+        <div><label for="quantity">Quantity</label><input id="quantity" type="number" name="quantity" min="1" step="1" required></div>
+        <div><label for="price">Price</label><input id="price" type="number" name="price" min="0.01" step="0.01" required></div>
+        <div><label for="fees">Fees (blank = default)</label><input id="fees" type="number" name="fees" min="0" step="0.01"></div>
+      </div>
+      <div class="fields"><div><label for="note">Note</label><input id="note" name="note"></div></div>
+      <button>Save trade</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Paste trades</h2>
+    <form method="post" action="/trades/paste">
+      <label for="text">One per line. Side defaults to BUY, date to today.</label>
+      <textarea id="text" name="text" placeholder="JKH 500 @ 19.50&#10;SELL COMB 100 @ 120 2026-11-01&#10;2026-11-03 B HNB 1,000 @ 310 fees 3500" required></textarea>
+      <p><button>Preview</button></p>
+    </form>
+    <h2>Upload .xlsx</h2>
+    <form method="post" action="/trades/upload" enctype="multipart/form-data">
+      <input type="file" name="file" accept=".xlsx" required>
+      <p><button>Preview</button> <a href="/trades/template.xlsx">Download template</a></p>
+    </form>
+    <p class="muted">Re-uploading the same sheet only adds rows that are not saved yet.</p>
+  </div>
+</div>
+
+<h2>History</h2>
+{% if trades %}
+<div class="tablewrap"><table>
+  <tr><th>Date</th><th class="l">Symbol</th><th class="l">Side</th><th>Qty</th><th>Price</th><th>Fees</th><th class="l">Note</th><th class="l">Source</th><th></th></tr>
+  {% for t in trades %}
+  <tr>
+    <td>{{ t.day }}</td><td class="l">{{ t.symbol }}</td>
+    <td class="l {{ 'pos' if t.side == 'BUY' else 'neg' }}">{{ t.side }}</td>
+    <td>{{ t.quantity|money(0) }}</td><td>{{ t.price|money }}</td>
+    <td>{{ t.fees|money if t.fees is not none else 'default' }}</td>
+    <td class="l">{{ t.note or '' }}</td><td class="l muted">{{ t.source }}</td>
+    <td><form class="inline" method="post" action="/trades/{{ t.id }}/delete" onsubmit="return confirm('Delete this trade?')"><button class="link">delete</button></form></td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% else %}
+<div class="card muted">No trades saved yet.</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% set active = 'watchlist' %}
+{% block title %}Watchlist · CSE Analyzer{% endblock %}
+{% block body %}
+<h1>Watchlist</h1>
+
+<div class="card">
+  <form method="post" action="/watchlist/add">
+    <div class="fields">
+      <div><label for="symbol">Symbol</label><input id="symbol" name="symbol" list="symbols" placeholder="HNB" required></div>
+      <div><label for="target_entry">Target entry price</label><input id="target_entry" type="number" name="target_entry" min="0" step="0.01"></div>
+      <div style="grid-column: span 2"><label for="note">Note</label><input id="note" name="note"></div>
+    </div>
+    <button>Add or update</button>
+  </form>
+</div>
+
+<h2>Watching</h2>
+{% if items %}
+<div class="tablewrap"><table>
+  <tr><th>Symbol</th><th>Last close</th><th>Target entry</th><th>Gap to target</th><th class="l">Note</th><th class="l">Added</th><th></th></tr>
+  {% for w in items %}
+  <tr>
+    <td><strong>{{ w.symbol }}</strong><br><span class="muted">{{ w.name or '' }}</span></td>
+    <td>{{ w.last_close|money }}</td>
+    <td>{{ w.target_entry|money }}</td>
+    <td>{% if w.target_entry and w.last_close %}{{ (100 * (w.last_close - w.target_entry) / w.target_entry)|signed(1) }}%{% else %}–{% endif %}</td>
+    <td class="l">{{ w.note or '' }}</td>
+    <td class="l muted">{{ w.added_at[:10] }}</td>
+    <td><form class="inline" method="post" action="/watchlist/{{ w.symbol }}/delete"><button class="link">remove</button></form></td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% else %}
+<div class="card muted">Nothing on the watchlist yet. Enter / Wait / Avoid verdicts arrive with the daily analysis.</div>
+{% endif %}
+{% endblock %}
