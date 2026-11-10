@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Check trades · CSE Analyzer{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div><h1>Check before saving</h1><div class="sub">Nothing has been saved yet.</div></div>
+</div>
+
+{% if kind == 'statement' %}
+<div class="alert info">This looks like a broker holdings statement. Each stock you do not already
+hold here becomes one opening buy dated {{ today }}, at the broker's average price
+split into price and fees, so the cost matches the statement. Positions already
+tracked here are left alone.</div>
+{% endif %}
+
+{% for e in errors %}<div class="alert warn">Skipped {{ e }}</div>{% endfor %}
+{% for n in notes %}<div class="alert warn">{{ n }}</div>{% endfor %}
+
+{% if rows %}
+<div class="card table-wrap"><table>
+  <thead><tr><th class="l">Date</th><th class="l">Stock</th><th class="l">Side</th><th>Shares</th><th>Price</th><th>Fees</th><th>Cost</th><th class="l">Note</th><th class="l">Status</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr style="{{ 'opacity:.55' if not r.include }}">
+    <td class="l">{{ r.day }}</td><td class="l sym">{{ r.symbol }}</td>
+    <td class="l"><span class="badge {{ 'b-enter' if r.side == 'BUY' else 'b-sell' }}">{{ r.side }}</span></td>
+    <td>{{ r.quantity|money(0) }}</td><td>{{ r.price|money(4 if kind == 'statement' else 2) }}</td>
+    <td>{{ r.fees|money if r.fees is not none else 'default' }}</td>
+    <td>{{ (r.quantity * r.price + (r.fees or 0))|money if r.fees is not none else '' }}</td>
+    <td class="l small">{{ r.note or '' }}</td>
+    <td class="l"><span class="badge {{ 'b-enter' if r.include else 'b-no-data' }}">{{ r.status }}</span></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+
+<p style="display:flex; gap:10px; align-items:center; margin-top:16px">
+{% set new = rows|selectattr('include')|list %}
+{% if new %}
+  <form class="inline" method="post" action="/trades/confirm">
+    <input type="hidden" name="payload" value="{{ payload }}">
+    <input type="hidden" name="source" value="{{ source }}">
+    <button class="btn">Save {{ new|length }} new trade{{ 's' if new|length != 1 }}</button>
+  </form>
+{% else %}
+  <span class="muted">Nothing new to save.</span>
+{% endif %}
+  <a class="btn secondary" href="/trades">Back</a>
+</p>
+{% endblock %}

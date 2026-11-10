@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, score, sym, chg %}
+{% block title %}Today · CSE Analyzer{% endblock %}
+{% block topactions %}
+<form method="post" action="/analysis/run" style="margin-left:auto; flex:none"><button class="btn secondary sm" title="Re-score everything from stored prices">↻ Refresh analysis</button></form>
+{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div>
+    <h1>Today</h1>
+    <div class="sub">{% if day %}Analysis of the {{ day }} close{% else %}No analysis yet{% endif %}</div>
+  </div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap">
+    {% if regime.known %}
+    <span class="chip" title="Enter signals are muted when the ASPI is below its 200-day average">
+      <span class="badge {{ 'b-enter' if regime.ok else 'b-sell' }}">{{ 'Market uptrend' if regime.ok else 'Market downtrend' }}</span>
+      ASPI {{ regime.aspi|money }} {{ chg(regime.change_pct) }} · 200-day {{ regime.ma200|money(0) }}
+    </span>
+    {% endif %}
+  </div>
+</div>
+
+{% if analysis_behind %}<div class="alert warn">The analysis is older than the latest prices. Use “Refresh analysis” above.</div>{% endif %}
+{% if not day %}
+<div class="card empty"><b>No analysis yet</b>Run <code>docker compose run --rm job daily</code>, or press “Refresh analysis” if prices are already stored.</div>
+{% else %}
+
+<div class="kpis">
+  <div class="card kpi"><div class="k">Portfolio value</div><div class="v">LKR {{ pf.market_value|money(0) }}</div>
+    <div class="d muted">{{ pf.holdings|length }} holdings</div></div>
+  <div class="card kpi"><div class="k">Today</div>
+    <div class="v {{ 'pos' if day_change > 0 else ('neg' if day_change < 0 else '') }}">{{ day_change|signed(0) }}</div>
+    <div class="d">{{ chg(day_change_pct) }}</div></div>
+  <div class="card kpi"><div class="k">Unrealised P/L, net of fees</div>
+    <div class="v {{ 'pos' if pf.unrealised >= 0 else 'neg' }}">{{ pf.unrealised|signed(0) }}</div>
+    <div class="d">{{ chg(100 * pf.unrealised / pf.cost if pf.cost else none) }} on cost {{ pf.cost|compact }}</div></div>
+  <div class="card kpi"><div class="k">Realised P/L</div>
+    <div class="v {{ 'pos' if pf.realised_total > 0 else ('neg' if pf.realised_total < 0 else '') }}">{{ pf.realised_total|signed(0) }}</div>
+    <div class="d muted">Fees paid {{ pf.fees_paid|compact }}</div></div>
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>Needs your attention</h2><span class="hint">{{ actions|length }} item{{ 's' if actions|length != 1 }}</span></div>
+  {% if actions %}
+  <div class="grid3">
+    {% for a in actions %}
+    <div class="card action v-{{ vclass(a.verdict) }}">
+      <div class="top"><div><a class="sym" href="/stock/{{ a.symbol }}">{{ a.symbol.split('.')[0] }}</a> <span class="muted small">{{ 'holding' if a.list == 'holding' else 'watchlist' }}</span></div>{{ badge(a.verdict) }}</div>
+      <div class="why">{{ a.reasons[0] }}</div>
+      <div class="meta">
+        <span>Close <b>{{ a.close|money }}</b></span>
+        {% if a.stop %}<span>Stop <b>{{ a.stop|money }}</b></span>{% endif %}
+        {% if a.target %}<span>Target <b>{{ a.target|money }}</b>{% if a.close >= a.target %} ✓ passed{% endif %}</span>{% endif %}
+        {% if a.size_shares %}<span>Size <b>{{ a.size_shares|money(0) }}</b> sh</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="card empty"><b>Nothing to act on</b>No holding is at its stop, target or weight limit, and no watchlist stock has an entry signal.</div>
+  {% endif %}
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>Holdings</h2><a class="hint" href="/holdings">Cost, break-even and stops →</a></div>
+  {% if rows %}
+  <div class="card table-wrap"><table>
+    <thead><tr><th class="l">Stock</th><th class="l">Verdict</th><th>Score</th><th class="l">40 days</th><th>Close</th><th>Day</th><th>Value</th><th>P/L net</th><th>Stop</th><th>Cushion</th><th class="l">Why</th></tr></thead>
+    <tbody>
+    {% for r in rows %}{% set h = r.h %}{% set s = r.sig %}
+    <tr>
+      <td class="l">{{ sym(h.symbol, h.name) }}</td>
+      <td class="l">{{ badge(s.verdict) }}</td>
+      <td>{{ score(s.score) }}</td>
+      <td class="l">{{ sparks.get(h.symbol, '') }}</td>
+      <td>{{ h.last_close|money }}</td>
+      <td>{{ chg(s.change_pct) }}</td>
+      <td>{{ h.market_value|money(0) }}</td>
+      <td><span class="{{ 'pos' if (h.unrealised or 0) >= 0 else 'neg' }}">{{ h.unrealised|signed(0) }}</span><div class="small">{{ chg(h.unrealised_pct, 1) }}</div></td>
+      <td>{{ s.stop|money }}<div class="small muted">{{ s.stop_stage or '' }}</div></td>
+      <td>{% if s.stop and h.last_close %}{{ chg(100 * (h.last_close / s.stop - 1), 1) }}{% else %}–{% endif %}</td>
+      <td class="l wrap small muted">{{ (s.reasons or [''])[0] }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="card empty"><b>No holdings yet</b><a href="/trades">Add trades</a> or upload your broker statement to see verdicts here.</div>
+  {% endif %}
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>Watchlist</h2><a class="hint" href="/watchlist">Manage →</a></div>
+  {% if watch %}
+  <div class="card table-wrap"><table>
+    <thead><tr><th class="l">Stock</th><th class="l">Verdict</th><th>Score</th><th class="l">40 days</th><th>Close</th><th>Day</th><th>Stop</th><th>Target</th><th>Size</th><th class="l">Why</th></tr></thead>
+    <tbody>
+    {% for w in watch %}
+    <tr>
+      <td class="l">{{ sym(w.symbol, w.name) }}</td><td class="l">{{ badge(w.verdict) }}</td><td>{{ score(w.score) }}</td>
+      <td class="l">{{ sparks.get(w.symbol, '') }}</td>
+      <td>{{ w.close|money }}</td><td>{{ chg(w.change_pct) }}</td><td>{{ w.stop|money }}</td><td>{{ w.target|money }}</td>
+      <td>{{ w.size_shares|money(0) if w.size_shares else '–' }}</td>
+      <td class="l wrap small muted">{{ w.reasons[0] }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="card empty"><b>Your watchlist is empty</b>Add stocks from the <a href="/scan">market scan</a> or any stock page to get Enter / Wait / Avoid calls.</div>
+  {% endif %}
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>Ideas from the market scan</h2>
+    <a class="hint" href="/scan">{{ scan_counts.Enter }} Enter · {{ scan_counts.Wait }} Wait · {{ scan_counts.Avoid }} Avoid →</a></div>
+  {% if ideas %}
+  <div class="grid3">
+    {% for x in ideas %}
+    <div class="card action v-enter">
+      <div class="top"><div><a class="sym" href="/stock/{{ x.symbol }}">{{ x.symbol.split('.')[0] }}</a> <span class="muted small">{{ x.name }}</span></div>{{ score(x.score) }}</div>
+      <div class="why">{{ x.reasons[0] }}</div>
+      <div class="meta"><span>Close <b>{{ x.close|money }}</b></span><span>Stop <b>{{ x.stop|money }}</b></span><span>Target <b>{{ x.target|money }}</b></span></div>
+      <form method="post" action="/watchlist/add"><input type="hidden" name="symbol" value="{{ x.symbol }}"><input type="hidden" name="next" value="/"><button class="btn secondary sm">+ Watch</button></form>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="card empty"><b>No entry setups today</b>No liquid stock outside your lists meets every entry rule.</div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

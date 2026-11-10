@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Trades · CSE Analyzer{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div><h1>Trades</h1><div class="sub">Every buy and sell. Holdings and P/L are calculated from these.</div></div>
+</div>
+
+<div class="grid2">
+  <div class="card pad">
+    <h2 style="margin-bottom:12px">Record a trade</h2>
+    <form method="post" action="/trades/add">
+      <div class="fields">
+        <div><label for="day">Date</label><input id="day" type="date" name="day" value="{{ today }}" required></div>
+        <div><label for="symbol">Stock</label><input id="symbol" name="symbol" list="symbols" placeholder="JKH" value="{{ request.query_params.get('symbol', '') }}" required></div>
+        <div><label for="side">Side</label><select id="side" name="side"><option>BUY</option><option>SELL</option></select></div>
+      </div>
+      <div class="fields">
+        <div><label for="quantity">Shares</label><input id="quantity" type="number" name="quantity" min="1" step="1" required></div>
+        <div><label for="price">Price</label><input id="price" type="number" name="price" min="0.01" step="0.01" required></div>
+        <div><label for="fees">Fees <span class="faint">(blank = default)</span></label><input id="fees" type="number" name="fees" min="0" step="0.01"></div>
+      </div>
+      <div class="fields"><div><label for="note">Note</label><input id="note" name="note" placeholder="Optional"></div></div>
+      <button class="btn">Save trade</button>
+    </form>
+  </div>
+
+  <div class="card pad">
+    <h2 style="margin-bottom:12px">Import several</h2>
+    <form method="post" action="/trades/paste">
+      <label for="text">Paste one trade per line. Side defaults to BUY and date to today.</label>
+      <textarea id="text" name="text" placeholder="JKH 500 @ 19.50&#10;SELL COMB 100 @ 120 2026-11-01&#10;2026-11-03 B HNB 1,000 @ 310 fees 3500" required></textarea>
+      <p style="margin:10px 0 18px"><button class="btn secondary">Preview</button></p>
+    </form>
+    <form method="post" action="/trades/upload" enctype="multipart/form-data">
+      <label for="file">Or upload an .xlsx: the <a href="/trades/template.xlsx">trades template</a> or your broker's Portfolio statement</label>
+      <div style="display:flex; gap:8px"><input id="file" type="file" name="file" accept=".xlsx" required><button class="btn secondary">Preview</button></div>
+    </form>
+    <p class="small muted" style="margin-bottom:0">Nothing is saved until you confirm the preview. Re-uploads skip trades already saved, and a statement never adds to a stock you already hold here.</p>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>History</h2><span class="hint">{{ trades|length }} trades</span></div>
+  {% if trades %}
+  <div class="card table-wrap"><table>
+    <thead><tr><th class="l">Date</th><th class="l">Stock</th><th class="l">Side</th><th>Shares</th><th>Price</th><th>Fees</th><th class="l">Note</th><th class="l">Source</th><th></th></tr></thead>
+    <tbody>
+    {% for t in trades %}
+    <tr>
+      <td class="l">{{ t.day }}</td><td class="l"><a class="sym" href="/stock/{{ t.symbol }}">{{ t.symbol }}</a></td>
+      <td class="l"><span class="badge {{ 'b-enter' if t.side == 'BUY' else 'b-sell' }}">{{ t.side }}</span></td>
+      <td>{{ t.quantity|money(0) }}</td><td>{{ t.price|money(4) if t.source == 'statement' else t.price|money }}</td>
+      <td>{{ t.fees|money if t.fees is not none else 'default' }}</td>
+      <td class="l wrap small">{{ t.note or '' }}</td><td class="l small muted">{{ t.source }}</td>
+      <td><form class="inline" method="post" action="/trades/{{ t.id }}/delete" onsubmit="return confirm('Delete this trade? Holdings and P/L will be recalculated.')"><button class="btn ghost">Delete</button></form></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="card empty"><b>No trades yet</b>Record one above, paste a few lines, or upload your broker statement.</div>
+  {% endif %}
+</div>
+{% endblock %}

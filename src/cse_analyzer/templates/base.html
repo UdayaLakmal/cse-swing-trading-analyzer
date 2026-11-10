@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}CSE Analyzer{% endblock %}</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M7 21l6-6 4 4 8-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f9fafb; --text: #111827; --muted: #6b7280; --faint: #9ca3af;
+  --border: #e5e7eb; --accent: #4f46e5; --accent-soft: #eef2ff; --accent-text: #4338ca;
+  --buy: #059669; --buy-soft: #ecfdf5; --sell: #dc2626; --sell-soft: #fef2f2;
+  --warn: #b45309; --warn-soft: #fffbeb; --info: #2563eb; --info-soft: #eff6ff; --neutral-soft: #f3f4f6;
+  --c1: #7c3aed; --c2: #ea580c; --shadow: 0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1117; --surface: #161b22; --surface-2: #1c2129; --text: #e6edf3; --muted: #9aa4b2; --faint: #6e7681;
+    --border: #2a313b; --accent: #818cf8; --accent-soft: #1e1b4b; --accent-text: #c7d2fe;
+    --buy: #34d399; --buy-soft: #052e22; --sell: #f87171; --sell-soft: #3b0d0d;
+    --warn: #fbbf24; --warn-soft: #3a2a05; --info: #60a5fa; --info-soft: #0b2545; --neutral-soft: #21262d;
+    --c1: #a78bfa; --c2: #fb923c; --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, "Segoe UI", Ubuntu, Roboto, "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased; }
+a { color: var(--accent-text); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.num, td, .kpi .v { font-variant-numeric: tabular-nums; }
+
+/* Shell */
+.shell { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+aside { background: var(--surface); border-right: 1px solid var(--border); padding: 18px 12px; position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 18px; font-weight: 700; font-size: 15px; color: var(--text); }
+.brand .logo { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); display: grid; place-items: center; }
+.nav a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--muted); font-weight: 500; }
+.nav a:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
+.nav a.on { background: var(--accent-soft); color: var(--accent-text); }
+.nav svg { width: 18px; height: 18px; flex: none; }
+.nav .sep { height: 1px; background: var(--border); margin: 10px 6px; }
+.side-foot { margin-top: auto; padding: 10px; font-size: 12px; color: var(--faint); }
+.side-foot .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--buy); margin-right: 6px; }
+.side-foot .dot.stale { background: var(--warn); }
+.main { min-width: 0; }
+.topbar { display: flex; align-items: center; gap: 12px; padding: 14px 28px; border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 5; }
+.topbar form { flex: 1; max-width: 420px; position: relative; }
+.topbar input { padding-left: 34px; }
+.topbar .sicon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--faint); }
+.menu-btn { display: none; }
+.content { padding: 24px 28px 64px; max-width: 1280px; }
+
+/* Type */
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+h1 { font-size: 22px; line-height: 1.25; margin: 0; letter-spacing: -.01em; }
+.sub { color: var(--muted); margin-top: 4px; }
+h2 { font-size: 15px; margin: 0; }
+.section { margin-top: 28px; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.section-head .hint { color: var(--muted); font-size: 13px; }
+.muted { color: var(--muted); } .faint { color: var(--faint); } .small { font-size: 12px; }
+.pos { color: var(--buy); } .neg { color: var(--sell); }
+
+/* Surfaces */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.card.pad { padding: 18px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.kpi { padding: 16px 18px; }
+.kpi .k { font-size: 12px; color: var(--muted); font-weight: 500; }
+.kpi .v { font-size: 22px; font-weight: 650; margin-top: 4px; letter-spacing: -.01em; }
+.kpi .d { font-size: 12px; margin-top: 2px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+
+/* Alerts */
+.alert { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; border: 1px solid; }
+.alert.warn { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 30%, transparent); color: var(--warn); }
+.alert.info { background: var(--info-soft); border-color: color-mix(in srgb, var(--info) 30%, transparent); color: var(--info); }
+.alert.ok { background: var(--buy-soft); border-color: color-mix(in srgb, var(--buy) 30%, transparent); color: var(--buy); }
+.alert code { background: transparent; }
+
+/* Tables */
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: 10px 14px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
+th { font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; background: var(--surface-2); }
+th:first-child { border-top-left-radius: var(--radius); } th:last-child { border-top-right-radius: var(--radius); }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover { background: var(--surface-2); }
+.l { text-align: left; }
+td.wrap { white-space: normal; min-width: 220px; }
+.sym { font-weight: 650; color: var(--text); }
+.sym-name { font-size: 12px; color: var(--muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+
+/* Badges & bars */
+.badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.b-sell, .b-avoid { background: var(--sell-soft); color: var(--sell); }
+.b-trim, .b-wait { background: var(--warn-soft); color: var(--warn); }
+.b-add, .b-enter { background: var(--buy-soft); color: var(--buy); }
+.b-hold { background: var(--info-soft); color: var(--info); }
+.b-no-data { background: var(--neutral-soft); color: var(--muted); }
+.b-avoid { opacity: .85; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); }
+.score { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.score .bar { width: 64px; height: 6px; border-radius: 3px; background: var(--neutral-soft); position: relative; overflow: hidden; }
+.score .bar i { position: absolute; top: 0; bottom: 0; }
+.score .bar i.p { left: 50%; background: var(--buy); }
+.score .bar i.n { right: 50%; background: var(--sell); }
+.score .bar::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--faint); }
+.score b { min-width: 30px; text-align: right; font-weight: 600; font-size: 13px; }
+
+/* Action cards */
+.action { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; border-left: 3px solid var(--border); }
+.action.v-sell { border-left-color: var(--sell); } .action.v-trim { border-left-color: var(--warn); }
+.action.v-add, .action.v-enter { border-left-color: var(--buy); }
+.action .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.action .why { color: var(--muted); font-size: 13px; }
+.action .meta { display: flex; gap: 14px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.action .meta b { color: var(--text); font-weight: 600; }
+
+/* Forms */
+label { display: block; font-size: 12px; font-weight: 500; color: var(--muted); margin-bottom: 4px; }
+input, select, textarea { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; width: 100%; }
+input:focus, select:focus, textarea:focus { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); border-color: var(--accent); }
+textarea { min-height: 128px; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 13px; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.btn { font: inherit; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 8px; padding: 8px 14px; background: var(--accent); color: #fff; cursor: pointer; white-space: nowrap; }
+.btn:hover { filter: brightness(1.07); text-decoration: none; }
+.btn.secondary { background: var(--surface); color: var(--text); border-color: var(--border); }
+.btn.secondary:hover { background: var(--surface-2); }
+.btn.sm { padding: 4px 10px; font-size: 12px; }
+.btn.ghost { background: none; color: var(--muted); padding: 2px 6px; font-weight: 500; }
+.btn.ghost:hover { color: var(--sell); }
+form.inline { display: inline; }
+input.small { width: 64px; padding: 4px 8px; }
+.tabs { display: inline-flex; gap: 4px; background: var(--neutral-soft); padding: 3px; border-radius: 9px; flex-wrap: wrap; }
+.tabs a { padding: 5px 12px; border-radius: 7px; color: var(--muted); font-weight: 500; font-size: 13px; }
+.tabs a.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.tabs a:hover { text-decoration: none; color: var(--text); }
+.tabs .n { color: var(--faint); margin-left: 4px; font-weight: 400; }
+.empty { padding: 32px; text-align: center; color: var(--muted); }
+.empty b { display: block; color: var(--text); margin-bottom: 4px; font-size: 15px; }
+.spark { width: 96px; height: 28px; display: block; }
+.spark path { fill: none; stroke-width: 1.6; }
+.spark.up path { stroke: var(--buy); } .spark.down path { stroke: var(--sell); }
+.chart { width: 100%; height: auto; display: block; }
+.chart .grid { stroke: var(--border); stroke-width: 1; }
+.chart .axis { fill: var(--faint); font-size: 11px; }
+.chart .lvl { font-size: 11px; font-weight: 600; }
+.chart .line { stroke: var(--accent); stroke-width: 2; }
+.chart .area { fill: color-mix(in srgb, var(--accent) 10%, transparent); }
+.chart .dot { fill: var(--accent); }
+.legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 6px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--border); border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
+.stats div { background: var(--surface); padding: 12px 14px; }
+.stats .k { font-size: 12px; color: var(--muted); } .stats .v { font-weight: 600; margin-top: 2px; }
+.range { position: relative; height: 6px; background: var(--neutral-soft); border-radius: 3px; margin: 8px 0 4px; }
+.range i { position: absolute; top: -3px; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); transform: translateX(-50%); }
+ul.reasons { margin: 0; padding-left: 18px; } ul.reasons li { margin: 2px 0; }
+.comp { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+.comp:last-child { border-bottom: 0; }
+.pts { font-weight: 600; min-width: 36px; text-align: right; }
+
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; }
+  aside { position: fixed; inset: 0 auto 0 0; width: 260px; z-index: 20; transform: translateX(-100%); transition: transform .2s; box-shadow: 0 0 40px rgba(0,0,0,.25); }
+  body.nav-open aside { transform: none; }
+  .menu-btn { display: inline-flex; }
+  .topbar, .content { padding-left: 16px; padding-right: 16px; }
+  th, td { padding: 9px 10px; }
+}
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+{% set nav = [
+  ('today', '/', 'Today', '<path d="M3 12l9-8 9 8M5 10v10h14V10"/>'),
+  ('holdings', '/holdings', 'Holdings', '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2"/>'),
+  ('watchlist', '/watchlist', 'Watchlist', '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
+  ('scan', '/scan', 'Market scan', '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>'),
+  ('trades', '/trades', 'Trades', '<path d="M7 7h13l-3-3M17 17H4l3 3"/>'),
+  ('strategy', '/strategy', 'Strategy', '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>'),
+] %}
+<div class="shell">
+  <aside>
+    <a class="brand" href="/"><span class="logo"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16l5-5 4 4 7-8"/></svg></span>CSE Analyzer</a>
+    <nav class="nav">
+      {% for key, href, label, icon in nav %}
+      <a href="{{ href }}" class="{{ 'on' if active == key }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{{ icon|safe }}</svg>{{ label }}</a>
+      {% endfor %}
+      <div class="sep"></div>
+      <a href="/settings" class="{{ 'on' if active == 'settings' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>Settings</a>
+    </nav>
+    <div class="side-foot">
+      <span class="dot {{ 'stale' if stale }}"></span>{{ 'Prices may be stale' if stale else 'Prices up to date' }}<br>
+      Latest close {{ latest_day or '–' }}<br>
+      Decision support only. Not financial advice.
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <button class="btn secondary sm menu-btn" onclick="document.body.classList.toggle('nav-open')" aria-label="Menu">☰</button>
+      <form action="/go" role="search">
+        <svg class="sicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input name="q" list="symbols" placeholder="Look up a stock, e.g. JKH" aria-label="Look up a stock" autocomplete="off">
+      </form>
+      {% block topactions %}{% endblock %}
+    </div>
+    <div class="content">
+      {% if stale %}<div class="alert warn">Prices may be stale: the newest stored close is {{ latest_day or 'missing' }}. Run <code>docker compose run --rm job daily</code>.</div>{% endif %}
+      {% if msg %}<div class="alert info">{{ msg }}</div>{% endif %}
+      {% block body %}{% endblock %}
+    </div>
+  </div>
+</div>
+<datalist id="symbols">{% for s in symbols %}<option value="{{ s }}">{% endfor %}</datalist>
+<script>
+document.addEventListener('click', e => { if (document.body.classList.contains('nav-open') && !e.target.closest('aside, .menu-btn')) document.body.classList.remove('nav-open'); });
+document.querySelector('form[role=search] input').addEventListener('change', e => { if (e.target.value && /\.[A-Z]0000$/.test(e.target.value)) e.target.form.submit(); });
+</script>
+</body>
+</html>

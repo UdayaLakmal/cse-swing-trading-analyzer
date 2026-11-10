@@ -1,0 +1,11 @@
+[Unit]
+Description=CSE Analyzer daily run, weekdays at 10:00 Colombo time
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 10:00:00 Asia/Colombo
+# If the laptop was off or asleep at 10:00, run as soon as it is back.
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

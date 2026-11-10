@@ -1,0 +1,18 @@
+{% macro badge(v) -%}
+<span class="badge b-{{ vclass(v) }}">{{ v or '–' }}</span>
+{%- endmacro %}
+
+{% macro score(s) -%}
+{% if s is defined and s is not none %}
+<span class="score" title="Score from -100 to +100"><span class="bar">{% if s >= 0 %}<i class="p" style="width: {{ (s|abs) / 2 }}%"></i>{% else %}<i class="n" style="width: {{ (s|abs) / 2 }}%"></i>{% endif %}</span><b class="{{ 'pos' if s > 0 else ('neg' if s < 0 else '') }}">{{ '%+d'|format(s) }}</b></span>
+{% else %}–{% endif %}
+{%- endmacro %}
+
+{% macro sym(symbol, name) -%}
+<a href="/stock/{{ symbol }}" class="sym">{{ symbol.split('.')[0] }}</a>{% if not symbol.endswith('.N0000') %} <span class="faint small">{{ symbol.split('.')[1] }}</span>{% endif %}
+<div class="sym-name" title="{{ name }}">{{ name }}</div>
+{%- endmacro %}
+
+{% macro chg(v, digits=2) -%}
+<span class="{{ 'pos' if (v or 0) > 0 else ('neg' if (v or 0) < 0 else 'muted') }}">{{ v|signed(digits) }}{% if v is not none %}%{% endif %}</span>
+{%- endmacro %}

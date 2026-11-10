@@ -1,0 +1,1 @@
+"""CSE swing-trading analyzer."""
