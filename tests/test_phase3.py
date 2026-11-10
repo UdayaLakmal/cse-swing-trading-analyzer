@@ -189,3 +189,48 @@ def test_pages_render(conn, tmp_path, monkeypatch):
     assert conn.execute("SELECT value FROM settings WHERE key='stop_loss_pct'").fetchone()[0] == "8"
     assert "not a number" in c.post("/settings", data={k: v for k, v in db.DEFAULT_SETTINGS.items()} | {"stop_loss_pct": "x"}).text
     assert c.get("/report/today", follow_redirects=False).status_code == 307
+
+
+# --- strategy page -------------------------------------------------------------
+
+
+def test_score_rules_cover_the_score():
+    ids = {r[0] for r in analysis.SCORE_RULES}
+    assert sum(r[4] for r in analysis.SCORE_RULES) == 100
+    aspi = pd.Series([1000.0] * 250, index=frame(uptrend()).index)
+    for closes in (uptrend(), list(reversed(uptrend())), uptrend(60)):
+        _, comps = analysis.score(analysis.compute_features("X", "X", frame(closes), aspi))
+        assert {c.rule for c in comps} - {"history"} <= ids
+
+
+def test_strategy_page(conn, tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from cse_analyzer import strategy
+
+    monkeypatch.setenv("CSE_DB_PATH", str(tmp_path / "t.db"))
+    from cse_analyzer.web import app
+
+    c = TestClient(app)
+    assert "No analysis yet" in c.get("/strategy").text
+    days = frame(uptrend()).index
+    save_trades(conn, [TradeRow(date.fromisoformat(days[100]), "UP.N0000", "BUY", 100, uptrend()[100])], "form")
+    conn.execute("INSERT INTO watchlist (symbol) VALUES ('DN.N0000')")
+    conn.commit()
+    analysis.run_analysis(conn)
+
+    data = strategy.build(conn, SETTINGS)
+    assert data["tagged"] and data["n_scored"] == 3
+    assert sum(data["hcount"].values()) == 1
+    assert data["ecount"]["downtrend"]["watch"] == 1
+    assert [m["sig"]["symbol"] for m in data["matrix"]] == ["UP.N0000", "DN.N0000"]
+    assert sum(data["matrix"][0]["groups"].values()) == data["matrix"][0]["sig"]["score"]
+    assert data["ladder"][0]["symbol"] == "UP.N0000" and data["ladder"][0]["stage"] in ("break-even", "trailing")
+    assert data["whatif"]["holdings"][0][1]["Hold"] + data["whatif"]["holdings"][0][1]["Add"] + \
+        data["whatif"]["holdings"][0][1]["Trim"] == 1
+    assert sum(b["n"] for b in data["dist"]) == 3
+
+    page = c.get("/strategy").text
+    for text in ("The strategy in one minute", "Your stocks, rule by rule", "Exits for your holdings",
+                 "How a verdict is decided", "How the score is built", "What if you changed a setting?"):
+        assert text in page

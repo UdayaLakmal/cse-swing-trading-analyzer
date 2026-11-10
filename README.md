@@ -51,7 +51,8 @@ see [docs/cse-api.md](docs/cse-api.md).
 - `src/cse_analyzer/indicators.py` – moving averages, RSI, MACD, ATR (pandas only)
 - `src/cse_analyzer/analysis.py` – score, verdicts, trailing stops, regime filter, signal log
 - `src/cse_analyzer/charts.py` – server-side SVG charts (work offline)
-- `src/cse_analyzer/web.py` + `templates/` – Today, Holdings, Watchlist, Market scan, stock pages, Trades, Settings
+- `src/cse_analyzer/strategy.py` – Strategy page data: rule hit counts, exit ladders, what-if re-runs
+- `src/cse_analyzer/web.py` + `templates/` – Today, Holdings, Watchlist, Market scan, stock pages, Trades, Strategy, Settings
 
 ## How the analysis works
 
@@ -76,6 +77,14 @@ break-even plus fees, then trails the highest close since entry by 3x ATR(14).
 The stop is stored and never moves down. Enter signals are muted to Wait when
 the ASPI is below its 200-day average. Every number above is editable on the
 Settings page, and every daily verdict is kept in the `signals` table.
+
+The **Strategy** page (`/strategy`) explains all of this against today's
+signals, to help tune it: the strategy in five steps with your settings, a
+per-group score breakdown for each holding and watchlist stock, each holding's
+exit ladder (initial stop, break-even trigger, trim target, current stop), how
+many stocks each verdict rule and score rule decided today, which entry check
+holds stocks back (and the near misses), the score spread, and a what-if table
+that re-runs today's verdicts with one setting changed without saving anything.
 
 ## Entering trades
 

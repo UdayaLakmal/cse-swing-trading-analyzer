@@ -51,7 +51,7 @@
 
   <div class="card pad">
     <h2 style="margin-bottom:6px">Why the score is {{ '%+d'|format(sig.score) if sig else '–' }}</h2>
-    <p class="small muted" style="margin-top:0">Each rule adds or subtracts points; the total runs from -100 to +100.</p>
+    <p class="small muted" style="margin-top:0">Each rule adds or subtracts points; the total runs from -100 to +100. <a href="/strategy">How the rules work →</a></p>
     {% for group, comps in groups.items() %}
     <div class="small faint" style="margin-top:8px; text-transform:uppercase; letter-spacing:.04em; font-weight:600">{{ group }}</div>
     {% for c in comps %}

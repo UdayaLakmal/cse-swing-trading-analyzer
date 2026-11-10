@@ -17,6 +17,26 @@ from . import indicators as ind
 from .portfolio import Holding, build_portfolio
 
 MIN_BARS = 30  # below this there is too little history to say anything
+ADD_MIN_SCORE = 40  # a holding needs at least this score for Add
+AVOID_MAX_SCORE = -20  # a watchlist or scan stock at or below this is Avoid
+
+# Every score rule: id, group, what it looks at, points it can give.
+# The Strategy page documents the score from this list and counts how often
+# each rule fires, so keep it in step with score() below.
+SCORE_RULES = [
+    ("ma20", "Trend", "Close vs 20-day average", "+5 above, -5 below", 5),
+    ("ma50", "Trend", "Close vs 50-day average", "+10 above, -10 below", 10),
+    ("ma200", "Trend", "Close vs 200-day average", "+15 above, -15 below", 15),
+    ("ma_cross", "Trend", "50-day vs 200-day average", "+10 if the 50-day is above (long-term uptrend), -10 if below", 10),
+    ("rsi", "Momentum", "RSI (14)", "+10 at 50-75, 0 at 30-50, -5 above 75 (overbought), -10 below 30", 10),
+    ("macd", "Momentum", "MACD vs its signal line", "+10 above, -10 below", 10),
+    ("macd_cross", "Momentum", "MACD crossover in the last 3 days", "+5 up-cross, -5 down-cross, else nothing", 5),
+    ("volume", "Volume", "Today's volume vs 20-day average", "+10 up day / -10 down day, only at 1.5x normal volume or more", 10),
+    ("rs1m", "Relative strength", "1-month return vs the ASPI", "+7 beat, -7 lagged", 7),
+    ("rs3m", "Relative strength", "3-month return vs the ASPI", "+8 beat, -8 lagged", 8),
+    ("range52", "Levels", "Position in the 52-week range", "+5 within 5% of the high, -5 within 5% of the low", 5),
+    ("break20", "Levels", "20-day breakout", "+5 close above the 20-day high, -5 below the 20-day low", 5),
+]
 
 
 @dataclass
@@ -50,6 +70,7 @@ class Component:
     group: str
     points: int
     reason: str
+    rule: str = ""  # id from SCORE_RULES
 
 
 @dataclass
@@ -69,6 +90,8 @@ class Signal:
     components: list[Component] = field(default_factory=list)
     size_shares: int | None = None
     features: Features | None = None
+    rule: str = ""  # which verdict rule decided (HOLDING_RULES / ENTRY_RULES)
+    checks: dict[str, bool] = field(default_factory=dict)  # entry checks and whether each passed
 
 
 def _f(x) -> float | None:
@@ -145,60 +168,60 @@ def score(f: Features) -> tuple[int, list[Component]]:
     """-100..+100 from trend, momentum, volume, relative strength and levels."""
     c: list[Component] = []
 
-    def add(group, pts, reason):
-        c.append(Component(group, pts, reason))
+    def add(group, pts, reason, rule):
+        c.append(Component(group, pts, reason, rule))
 
     # Trend (up to ±40)
     if f.ma20:
-        add("Trend", 5 if f.close > f.ma20 else -5, f"{'Above' if f.close > f.ma20 else 'Below'} 20-day average ({f.ma20:,.2f})")
+        add("Trend", 5 if f.close > f.ma20 else -5, f"{'Above' if f.close > f.ma20 else 'Below'} 20-day average ({f.ma20:,.2f})", "ma20")
     if f.ma50:
-        add("Trend", 10 if f.close > f.ma50 else -10, f"{'Above' if f.close > f.ma50 else 'Below'} 50-day average ({f.ma50:,.2f})")
+        add("Trend", 10 if f.close > f.ma50 else -10, f"{'Above' if f.close > f.ma50 else 'Below'} 50-day average ({f.ma50:,.2f})", "ma50")
     if f.ma200:
-        add("Trend", 15 if f.close > f.ma200 else -15, f"{'Above' if f.close > f.ma200 else 'Below'} 200-day average ({f.ma200:,.2f})")
+        add("Trend", 15 if f.close > f.ma200 else -15, f"{'Above' if f.close > f.ma200 else 'Below'} 200-day average ({f.ma200:,.2f})", "ma200")
         if f.ma50:
             up = f.ma50 > f.ma200
-            add("Trend", 10 if up else -10, "50-day above 200-day (long-term uptrend)" if up else "50-day below 200-day (long-term downtrend)")
+            add("Trend", 10 if up else -10, "50-day above 200-day (long-term uptrend)" if up else "50-day below 200-day (long-term downtrend)", "ma_cross")
     elif f.bars < 200:
-        add("Trend", 0, f"Only {f.bars} days of history: no 200-day average yet")
+        add("Trend", 0, f"Only {f.bars} days of history: no 200-day average yet", "history")
 
     # Momentum (up to ±25)
     if f.rsi is not None:
         r = f.rsi
         if r > 75:
-            add("Momentum", -5, f"RSI {r:.0f}: overbought, pullback risk")
+            add("Momentum", -5, f"RSI {r:.0f}: overbought, pullback risk", "rsi")
         elif r >= 50:
-            add("Momentum", 10, f"RSI {r:.0f}: positive momentum")
+            add("Momentum", 10, f"RSI {r:.0f}: positive momentum", "rsi")
         elif r >= 30:
-            add("Momentum", 0, f"RSI {r:.0f}: neutral to soft")
+            add("Momentum", 0, f"RSI {r:.0f}: neutral to soft", "rsi")
         else:
-            add("Momentum", -10, f"RSI {r:.0f}: oversold, sellers in control")
+            add("Momentum", -10, f"RSI {r:.0f}: oversold, sellers in control", "rsi")
     if f.macd_hist is not None:
-        add("Momentum", 10 if f.macd_hist > 0 else -10, "MACD above its signal line" if f.macd_hist > 0 else "MACD below its signal line")
+        add("Momentum", 10 if f.macd_hist > 0 else -10, "MACD above its signal line" if f.macd_hist > 0 else "MACD below its signal line", "macd")
     if f.macd_cross:
-        add("Momentum", 5 * f.macd_cross, "MACD crossed up in the last 3 days" if f.macd_cross > 0 else "MACD crossed down in the last 3 days")
+        add("Momentum", 5 * f.macd_cross, "MACD crossed up in the last 3 days" if f.macd_cross > 0 else "MACD crossed down in the last 3 days", "macd_cross")
 
     # Volume (±10)
     if f.vol_ratio is not None and f.vol_ratio >= 1.5 and f.change_pct is not None:
         if f.change_pct > 0:
-            add("Volume", 10, f"Up day on {f.vol_ratio:.1f}x normal volume")
+            add("Volume", 10, f"Up day on {f.vol_ratio:.1f}x normal volume", "volume")
         elif f.change_pct < 0:
-            add("Volume", -10, f"Down day on {f.vol_ratio:.1f}x normal volume")
+            add("Volume", -10, f"Down day on {f.vol_ratio:.1f}x normal volume", "volume")
 
     # Relative strength vs ASPI (±15)
     if f.rs1m is not None:
-        add("Relative strength", 7 if f.rs1m > 0 else -7, f"{'Beat' if f.rs1m > 0 else 'Lagged'} the ASPI by {abs(f.rs1m):.1f} pts over 1 month")
+        add("Relative strength", 7 if f.rs1m > 0 else -7, f"{'Beat' if f.rs1m > 0 else 'Lagged'} the ASPI by {abs(f.rs1m):.1f} pts over 1 month", "rs1m")
     if f.rs3m is not None:
-        add("Relative strength", 8 if f.rs3m > 0 else -8, f"{'Beat' if f.rs3m > 0 else 'Lagged'} the ASPI by {abs(f.rs3m):.1f} pts over 3 months")
+        add("Relative strength", 8 if f.rs3m > 0 else -8, f"{'Beat' if f.rs3m > 0 else 'Lagged'} the ASPI by {abs(f.rs3m):.1f} pts over 3 months", "rs3m")
 
     # Levels (±10)
     if f.hi52 and f.close >= 0.95 * f.hi52:
-        add("Levels", 5, f"Within 5% of the 52-week high ({f.hi52:,.2f})")
+        add("Levels", 5, f"Within 5% of the 52-week high ({f.hi52:,.2f})", "range52")
     elif f.lo52 and f.close <= 1.05 * f.lo52:
-        add("Levels", -5, f"Within 5% of the 52-week low ({f.lo52:,.2f})")
+        add("Levels", -5, f"Within 5% of the 52-week low ({f.lo52:,.2f})", "range52")
     if f.swing_hi20 and f.close > f.swing_hi20:
-        add("Levels", 5, f"Broke above the 20-day high ({f.swing_hi20:,.2f})")
+        add("Levels", 5, f"Broke above the 20-day high ({f.swing_hi20:,.2f})", "break20")
     elif f.swing_lo20 and f.close < f.swing_lo20:
-        add("Levels", -5, f"Broke below the 20-day low ({f.swing_lo20:,.2f})")
+        add("Levels", -5, f"Broke below the 20-day low ({f.swing_lo20:,.2f})", "break20")
 
     total = max(-100, min(100, sum(x.points for x in c)))
     return total, c
@@ -234,19 +257,19 @@ def holding_verdict(h: Holding, f: Features, sc: int, s: dict, *, highest: float
     reasons = []
     liquid = (f.turnover20 or 0) >= s["min_turnover_lkr"]
     if f.close < stop:
-        verdict = "Sell"
+        verdict, rule = "Sell", "stop"
         reasons.append(f"Closed at {f.close:,.2f}, below the {stage} stop of {stop:,.2f}")
     elif f.close >= target and not sold_since_entry:
-        verdict = "Trim"
+        verdict, rule = "Trim", "target"
         reasons.append(f"Reached +{s['partial_take_at_r']:g}R ({target:,.2f}): take about a third off and let the rest run on the trailing stop")
     elif h.weight_pct and h.weight_pct > s["max_weight_pct"]:
-        verdict = "Trim"
+        verdict, rule = "Trim", "weight"
         reasons.append(f"{h.weight_pct:.0f}% of the portfolio, above your {s['max_weight_pct']:g}% limit")
-    elif sc >= 40 and f.close > h.entry_price and regime_ok and liquid:
-        verdict = "Add"
+    elif sc >= ADD_MIN_SCORE and f.close > h.entry_price and regime_ok and liquid:
+        verdict, rule = "Add", "add"
         reasons.append(f"Strong score ({sc:+d}) and in profit; room below your {s['max_weight_pct']:g}% weight limit")
     else:
-        verdict = "Hold"
+        verdict, rule = "Hold", "hold"
         cushion = 100 * (f.close / stop - 1)
         reasons.append(f"Above the {stage} stop of {stop:,.2f} ({cushion:.1f}% cushion)")
         if sc <= -40:
@@ -254,7 +277,7 @@ def holding_verdict(h: Holding, f: Features, sc: int, s: dict, *, highest: float
     if not liquid:
         reasons.append(f"Thinly traded (avg LKR {f.turnover20 or 0:,.0f}/day): exits may move the price")
     return Signal(h.symbol, h.name, "holding", verdict, sc, f.close, f.day, f.change_pct,
-                  stop=stop, target=target, stop_stage=stage, reasons=reasons)
+                  stop=stop, target=target, stop_stage=stage, reasons=reasons, rule=rule)
 
 
 def entry_verdict(f: Features, sc: int, s: dict, *, regime_ok: bool, capital: float,
@@ -272,23 +295,23 @@ def entry_verdict(f: Features, sc: int, s: dict, *, regime_ok: bool, capital: fl
         "volume at or above normal": f.vol_ratio is not None and f.vol_ratio >= 1.0,
     }
     if not liquid:
-        verdict = "Avoid"
+        verdict, rule = "Avoid", "illiquid"
         reasons.append(f"Thin trading: average LKR {f.turnover20 or 0:,.0f}/day, below your {s['min_turnover_lkr']:,.0f} minimum")
     elif downtrend:
-        verdict = "Avoid"
+        verdict, rule = "Avoid", "downtrend"
         reasons.append("Downtrend: below the 200-day average and the 50-day is under the 200-day")
-    elif sc <= -20:
-        verdict = "Avoid"
+    elif sc <= AVOID_MAX_SCORE:
+        verdict, rule = "Avoid", "weak"
         reasons.append(f"Weak score ({sc:+d})")
     elif all(checks.values()):
         if regime_ok:
-            verdict = "Enter"
+            verdict, rule = "Enter", "enter"
             reasons.append(f"Above the 50-day, RSI {f.rsi:.0f} after a pullback, volume {f.vol_ratio:.1f}x normal")
         else:
-            verdict = "Wait"
+            verdict, rule = "Wait", "regime"
             reasons.append("Setup is in place, but the ASPI is below its 200-day average: buys fail more often in a falling market")
     else:
-        verdict = "Wait"
+        verdict, rule = "Wait", "missing"
         missing = [k for k, ok in checks.items() if not ok]
         reasons.append("Waiting for: " + ", ".join(missing))
         if f.rsi is not None and f.rsi > hi:
@@ -302,7 +325,8 @@ def entry_verdict(f: Features, sc: int, s: dict, *, regime_ok: bool, capital: fl
         size = int(risk_lkr / (f.close - stop))
         size = min(size, int(capital * s["max_weight_pct"] / 100 / f.close))
     return Signal(f.symbol, f.name, listname, verdict, sc, f.close, f.day, f.change_pct,
-                  stop=stop, target=target, stop_stage="suggested", reasons=reasons, size_shares=size)
+                  stop=stop, target=target, stop_stage="suggested", reasons=reasons, size_shares=size,
+                  rule=rule, checks=checks)
 
 
 # --- run -----------------------------------------------------------------
@@ -396,7 +420,7 @@ def run_analysis(conn: sqlite3.Connection) -> dict:
             [(day, x.symbol, x.list, x.verdict, x.score, x.close, x.stop, x.target,
               json.dumps({"reasons": x.reasons, "components": [asdict(c) for c in x.components],
                           "stop_stage": x.stop_stage, "size_shares": x.size_shares, "name": x.name,
-                          "change_pct": x.change_pct, "bar_day": x.day,
+                          "change_pct": x.change_pct, "bar_day": x.day, "rule": x.rule, "checks": x.checks,
                           "features": asdict(x.features) if x.features else None}))
              for x in signals],
         )

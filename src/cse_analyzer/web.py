@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from jinja2 import Undefined
 
-from . import analysis, charts, collector, db
+from . import analysis, charts, collector, db, strategy
 from .cli import status
 from .config import load_settings
 from .portfolio import build_portfolio
@@ -389,6 +389,15 @@ def watchlist_delete(symbol: str, next: str = Form("/watchlist"), conn=Depends(g
     analysis.run_analysis(conn)
     dest = next if next.startswith("/") and not next.startswith("//") else "/watchlist"
     return back(dest, f"{symbol} removed from the watchlist")
+
+
+# --- Strategy --------------------------------------------------------------
+
+
+@app.get("/strategy", response_class=HTMLResponse)
+def strategy_page(request: Request, conn=Depends(get_conn)):
+    s = settings_of(conn)
+    return render(request, "strategy.html", conn, active="strategy", s=s, **strategy.build(conn, s))
 
 
 # --- Settings --------------------------------------------------------------
