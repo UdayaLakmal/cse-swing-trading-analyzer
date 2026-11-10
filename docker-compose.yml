@@ -1,0 +1,25 @@
+services:
+  # Long-running report site at http://localhost:8080
+  web:
+    build: .
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      CSE_DB_PATH: /data/cse.db
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+  # One-shot job, started by the host systemd timer:
+  #   docker compose run --rm job daily
+  job:
+    build: .
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      CSE_DB_PATH: /data/cse.db
+    volumes:
+      - ./data:/data
+    entrypoint: ["cse"]
+    command: ["daily"]
+    profiles: ["job"]
