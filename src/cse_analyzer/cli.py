@@ -7,7 +7,7 @@ import json
 import logging
 import sys
 
-from . import collector, db
+from . import analysis, collector, db
 from .config import load_settings
 from .cse_client import PERIOD_YEAR, CseClient
 
@@ -18,6 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("backfill", help="Fetch ~1 year of daily history for every stock")
     daily = sub.add_parser("daily", help="Daily collection (skips if today already ran)")
     daily.add_argument("--force", action="store_true", help="Run even if today already succeeded")
+    sub.add_parser("analyze", help="Re-run the analysis on stored prices (no fetching)")
     sub.add_parser("status", help="Show what is stored and when it last ran")
     args = parser.parse_args(argv)
 
@@ -28,6 +29,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "status":
         print(json.dumps(status(conn), indent=2))
+        return 0
+
+    if args.cmd == "analyze":
+        print(json.dumps(analysis.run_analysis(conn), indent=2))
         return 0
 
     if args.cmd == "daily" and not args.force:
@@ -45,7 +50,10 @@ def main(argv: list[str] | None = None) -> int:
             progress=lambda m: logging.info(m),
         )
     print(json.dumps({k: v for k, v in stats.items() if k != "failed"} | {"failed": stats["failed"][:20]}, indent=2))
-    return 0 if stats["status"] != "failed" else 1
+    if stats["status"] == "failed":
+        return 1
+    print(json.dumps({"analysis": analysis.run_analysis(conn)}, indent=2))
+    return 0
 
 
 def status(conn) -> dict:

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, score, sym, chg %}
+{% block title %}Market scan · CSE Analyzer{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div><h1>Market scan</h1><div class="sub">Every stock with enough history, scored on the {{ day or '–' }} close</div></div>
+  <div class="tabs">
+    {% for k in ['Enter', 'Wait', 'Avoid', 'All'] %}
+    <a href="/scan?v={{ k }}" class="{{ 'on' if v == k }}">{{ k }}<span class="n">{{ total if k == 'All' else counts.get(k, 0) }}</span></a>
+    {% endfor %}
+  </div>
+</div>
+
+<div style="margin-bottom:12px; max-width:320px"><input id="filter" placeholder="Filter by symbol or name" aria-label="Filter"></div>
+
+{% if rows %}
+<div class="card table-wrap"><table id="scan">
+  <thead><tr><th class="l">Stock</th><th class="l">Verdict</th><th>Score</th><th>Close</th><th>Day</th><th>RSI</th><th>Turnover/day</th><th>vs ASPI 3m</th><th class="l">Why</th><th></th></tr></thead>
+  <tbody>
+  {% for x in rows %}{% set f = x.features or {} %}
+  <tr data-q="{{ (x.symbol ~ ' ' ~ x.name)|lower }}">
+    <td class="l">{{ sym(x.symbol, x.name) }}</td>
+    <td class="l">{{ badge(x.verdict) }}{% if x.list != 'scan' %} <span class="faint small">{{ x.list }}</span>{% endif %}</td>
+    <td>{{ score(x.score) }}</td>
+    <td>{{ x.close|money }}</td><td>{{ chg(x.change_pct) }}</td>
+    <td>{{ f.rsi|money(0) if f.rsi is not none else '–' }}</td>
+    <td>{{ f.turnover20|compact }}</td>
+    <td>{{ chg(f.rs3m, 1) }}</td>
+    <td class="l wrap small muted">{{ x.reasons[0] }}</td>
+    <td>{% if x.list == 'scan' and x.symbol not in watched %}
+      <form method="post" action="/watchlist/add"><input type="hidden" name="symbol" value="{{ x.symbol }}"><input type="hidden" name="next" value="/scan?v={{ v }}"><button class="btn secondary sm">+ Watch</button></form>
+    {% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<div class="card empty"><b>Nothing here</b>No stock has a {{ v }} verdict today.</div>
+{% endif %}
+<script>
+document.getElementById('filter').addEventListener('input', e => {
+  const q = e.target.value.trim().toLowerCase();
+  document.querySelectorAll('#scan tbody tr').forEach(r => r.style.display = !q || r.dataset.q.includes(q) ? '' : 'none');
+});
+</script>
+{% endblock %}

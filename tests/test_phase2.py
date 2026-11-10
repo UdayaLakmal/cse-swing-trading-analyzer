@@ -134,14 +134,18 @@ def test_portfolio_closed_position_and_oversell(conn):
 def test_per_stock_stop_and_trailing(conn):
     save_trades(conn, [TradeRow(date(2026, 11, 1), "JKH.N0000", "BUY", 100, 20.0)], "form")
     conn.execute("INSERT INTO prices_daily VALUES (1, '2026-11-09', 0, 0, 17.5, 0)")
-    conn.execute("INSERT INTO position_settings VALUES ('JKH.N0000', 5, NULL)")
+    conn.execute("INSERT INTO position_settings (symbol, stop_loss_pct) VALUES ('JKH.N0000', 5)")
     conn.commit()
     (h,) = build_portfolio(conn).holdings
     assert h.effective_stop == pytest.approx(19.0)
     assert h.below_stop
-    conn.execute("UPDATE position_settings SET stop_price = 19.5")
+    conn.execute("UPDATE position_settings SET stop_price = 19.5, stop_entry_day = '2026-11-01'")
     conn.commit()
     assert build_portfolio(conn).holdings[0].effective_stop == pytest.approx(19.5)
+    # A stop stored for an earlier position of the same stock does not apply.
+    conn.execute("UPDATE position_settings SET stop_entry_day = '2026-01-01'")
+    conn.commit()
+    assert build_portfolio(conn).holdings[0].effective_stop == pytest.approx(19.0)
 
 
 def test_web_flows(conn, tmp_path, monkeypatch):
@@ -151,7 +155,7 @@ def test_web_flows(conn, tmp_path, monkeypatch):
     from cse_analyzer.web import app
 
     c = TestClient(app)
-    assert "No holdings yet" in c.get("/").text
+    assert "No holdings yet" in c.get("/holdings").text
 
     r = c.post("/trades/add", data={"day": "2026-11-01", "symbol": "jkh", "side": "BUY", "quantity": 100, "price": 20})
     assert "Saved BUY 100 JKH.N0000" in r.text
@@ -165,14 +169,14 @@ def test_web_flows(conn, tmp_path, monkeypatch):
     r = c.post("/trades/upload", files={"file": ("t.xlsx", xlsx_template())})
     assert "Save 1 new trade" in r.text
 
-    page = c.get("/").text
+    page = c.get("/holdings").text
     assert "JKH.N0000" in page and "COMB.N0000" in page
 
-    assert "Stop-loss for JKH.N0000 updated" in c.post("/holdings/JKH.N0000/stop", data={"stop_loss_pct": "7"}).text
+    assert "Stop-loss for JKH.N0000 set to 7%" in c.post("/holdings/JKH.N0000/stop", data={"stop_loss_pct": "7"}).text
     assert c.post("/holdings/JKH.N0000/stop", data={"stop_loss_pct": "150"}).status_code == 400
 
-    assert "HNB.N0000 saved" in c.post("/watchlist/add", data={"symbol": "hnb", "target_entry": "290"}).text
-    assert "HNB.N0000 removed" in c.post("/watchlist/HNB.N0000/delete").text
+    assert "HNB.N0000 is on your watchlist" in c.post("/watchlist/add", data={"symbol": "hnb", "target_entry": "290"}).text
+    assert "HNB.N0000 removed from the watchlist" in c.post("/watchlist/HNB.N0000/delete").text
 
     tid = conn.execute("SELECT id FROM trades WHERE symbol = 'COMB.N0000'").fetchone()[0]
     assert "Trade deleted" in c.post(f"/trades/{tid}/delete").text

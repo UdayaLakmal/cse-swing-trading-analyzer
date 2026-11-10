@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, score, sym, chg %}
+{% block title %}Strategy · CSE Analyzer{% endblock %}
+{% block head %}
+<style>
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.step { padding: 14px 16px; }
+.step .n { font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .05em; }
+.step h3 { margin: 4px 0 6px; font-size: 15px; }
+.step p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.step b { color: var(--text); font-weight: 600; }
+.concl { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.concl .card { padding: 14px 16px; }
+.concl .k { font-size: 12px; color: var(--muted); font-weight: 500; margin-bottom: 8px; }
+.concl .row { display: flex; flex-wrap: wrap; gap: 6px; }
+.hints { display: grid; gap: 8px; margin-top: 14px; }
+.hints .alert { margin: 0; justify-content: space-between; flex-wrap: wrap; }
+.hints .alert a { font-weight: 600; white-space: nowrap; }
+td.heat { font-weight: 600; text-align: center; min-width: 64px; }
+td.heat .of { font-weight: 400; color: var(--faint); font-size: 11px; }
+.rules-list { list-style: none; margin: 0; padding: 0; }
+.rules-list li { display: grid; grid-template-columns: 22px 70px 1fr auto; gap: 10px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.rules-list li:last-child { border-bottom: 0; }
+.rules-list .i { color: var(--faint); font-weight: 600; }
+.rules-list .c { color: var(--muted); text-align: right; white-space: nowrap; }
+.rules-list .c b { color: var(--text); }
+.hitbar { display: flex; width: 120px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--neutral-soft); }
+.hitbar .p { background: var(--buy); } .hitbar .n { background: var(--sell); }
+.hist { display: flex; align-items: flex-end; gap: 6px; height: 170px; padding: 16px 16px 0; }
+.hist .col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; min-width: 0; }
+.hist .bar { width: 100%; border-radius: 4px 4px 0 0; background: var(--neutral-soft); position: relative; min-height: 2px; }
+.hist .bar.pos { background: color-mix(in srgb, var(--buy) 45%, transparent); }
+.hist .bar.neg { background: color-mix(in srgb, var(--sell) 45%, transparent); }
+.hist .bar .mine { position: absolute; left: 0; right: 0; bottom: 0; background: var(--accent); border-radius: 0; }
+.hist .cnt { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+.hist-x { display: flex; gap: 6px; padding: 6px 16px 14px; }
+.hist-x span { flex: 1; text-align: center; font-size: 11px; color: var(--faint); min-width: 0; }
+.legend-row { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); padding: 0 16px 14px; }
+.legend-row i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+tr.current td { background: var(--surface-2); font-weight: 600; }
+@media (max-width: 640px) { .rules-list li { grid-template-columns: 18px 62px 1fr; } .rules-list .c { grid-column: 3; text-align: left; } .hist { gap: 3px; padding: 12px 8px 0; } .hist-x { gap: 3px; padding: 6px 8px 12px; } }
+</style>
+{% endblock %}
+{% block topactions %}
+<form method="post" action="/analysis/run" style="margin-left:auto; flex:none"><button class="btn secondary sm" title="Re-score everything from stored prices">↻ Refresh analysis</button></form>
+{% endblock %}
+{% macro heat(p, mx) -%}
+{% set a = (8 + 42 * (p|abs) / (mx or 1))|round(0) %}
+<td class="heat" style="background: {% if p > 0 %}color-mix(in srgb, var(--buy) {{ a }}%, transparent){% elif p < 0 %}color-mix(in srgb, var(--sell) {{ a }}%, transparent){% else %}transparent{% endif %}">
+  <span class="{{ 'pos' if p > 0 else ('neg' if p < 0 else 'faint') }}">{{ '%+d'|format(p) }}</span> <span class="of">/{{ mx }}</span></td>
+{%- endmacro %}
+{% block body %}
+<div class="page-head">
+  <div>
+    <h1>Strategy</h1>
+    <div class="sub">How every score and verdict is worked out{% if day %}, checked against the {{ day }} signals{% endif %}. Use it to spot a rule that misfires or a setting that is too tight.</div>
+  </div>
+  <a class="btn secondary sm" href="/settings">Tune settings →</a>
+</div>
+
+{% if not day %}
+<div class="card empty"><b>No analysis yet</b>Press “Refresh analysis” once prices are stored.</div>
+{% else %}
+{% if not tagged %}<div class="alert warn">These signals were saved before rule tracking existed, so some counts below read zero. Press “Refresh analysis” to fill them in.</div>{% endif %}
+
+<div class="section" style="margin-top:8px">
+  <div class="section-head"><h2>The strategy in one minute</h2><span class="hint">Swing trading: buy pullbacks in uptrends, cut losers fast, let winners run</span></div>
+  <div class="steps">
+    <div class="card step"><div class="n">1 · Market</div><h3>Trade with the tide</h3>
+      <p>New buys only while the <b>ASPI is above its 200-day average</b>. Today:
+      {% if regime.known %}<b class="{{ 'pos' if regime.ok else 'neg' }}">{{ 'uptrend' if regime.ok else 'downtrend' }}</b> ({{ regime.aspi|money(0) }} vs {{ regime.ma200|money(0) }}){% else %}not enough index history{% endif %}.</p></div>
+    <div class="card step"><div class="n">2 · Filter</div><h3>Liquid stocks in uptrends</h3>
+      <p>Skip stocks trading under <b>LKR {{ s.min_turnover_lkr|compact }}/day</b>, in a long downtrend, or scoring <b>{{ '%+d'|format(avoid_max) }}</b> or worse.</p></div>
+    <div class="card step"><div class="n">3 · Entry</div><h3>Buy the pullback</h3>
+      <p>Close <b>above the 50-day</b>, RSI back in <b>{{ s.enter_rsi_low|money(0) }}–{{ s.enter_rsi_high|money(0) }}</b>, volume <b>at or above normal</b>.</p></div>
+    <div class="card step"><div class="n">4 · Size</div><h3>Risk a fixed slice</h3>
+      <p>Stop <b>{{ s.stop_loss_pct|money(0) }}%</b> below entry (that distance is <b>1R</b>). Size so a stop-out loses <b>{{ s.risk_per_trade_pct|money(1) }}%</b> of capital, max <b>{{ s.max_weight_pct|money(0) }}%</b> in one stock.</p></div>
+    <div class="card step"><div class="n">5 · Exit</div><h3>Ratchet the stop up</h3>
+      <p>At <b>+{{ s.breakeven_at_r|money(1) }}R</b> the stop moves to break-even, then trails the highest close by <b>{{ s.chandelier_atr_mult|money(1) }}× ATR</b>. Take a third off at <b>+{{ s.partial_take_at_r|money(1) }}R</b>. It never moves down.</p></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>Today's conclusion</h2><span class="hint">{{ n_scored }} stocks scored</span></div>
+  <div class="concl">
+    {% for title, lst in [('Your holdings', 'holding'), ('Your watchlist', 'watch'), ('Rest of the market', 'scan')] %}
+    <div class="card"><div class="k">{{ title }}</div><div class="row">
+      {% for v, cnt in conclusion[lst].items() %}
+      <span class="badge b-{{ vclass(v) }}" style="{{ '' if cnt else 'opacity:.45' }}">{{ cnt }} {{ v }}</span>
+      {% endfor %}
+    </div></div>
+    {% endfor %}
+  </div>
+  <div class="hints">
+    {% for h in hints %}
+    <div class="alert {{ h.level }}"><span>{{ h.text }}</span>{% if h.href %}<a href="{{ h.href }}">{{ h.link }} →</a>{% endif %}</div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>Your stocks, rule by rule</h2><span class="hint">Points per group, out of the most it can give. Click a stock for every rule.</span></div>
+  {% if matrix %}
+  <div class="card table-wrap"><table>
+    <thead><tr><th class="l">Stock</th>{% for g in groups %}<th style="text-align:center">{{ g }}</th>{% endfor %}<th>Score</th><th class="l">Verdict</th><th class="l">Decided by</th><th class="l">Why</th></tr></thead>
+    <tbody>
+    {% set ns = namespace(last='') %}
+    {% for m in matrix %}{% set x = m.sig %}
+    {% if x.list != ns.last %}{% set ns.last = x.list %}
+    <tr><td class="l small faint" colspan="{{ groups|length + 5 }}" style="background:var(--surface-2); text-transform:uppercase; letter-spacing:.04em; font-weight:600">{{ 'Holdings' if x.list == 'holding' else 'Watchlist' }}</td></tr>
+    {% endif %}
+    <tr>
+      <td class="l">{{ sym(x.symbol, x.name) }}</td>
+      {% for g in groups %}{{ heat(m.groups[g], group_max[g]) }}{% endfor %}
+      <td>{{ score(x.score) }}</td>
+      <td class="l">{{ badge(x.verdict) }}</td>
+      <td class="l small">{{ labels.get(x.rule, '–') }}</td>
+      <td class="l wrap small muted">{{ (x.reasons or [''])[0] }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="card empty"><b>No holdings or watchlist stocks</b>Add trades or watch a stock to see its breakdown here.</div>
+  {% endif %}
+</div>
+
+{% if ladder %}
+<div class="section">
+  <div class="section-head"><h2>Exits for your holdings</h2><a class="hint" href="/holdings">Change a stop % →</a></div>
+  <div class="card table-wrap"><table>
+    <thead><tr><th class="l">Stock</th><th>Close</th><th>Entry</th><th>Move</th><th>Initial stop</th><th>Break-even at</th><th>Trim at</th><th>Highest since entry</th><th>Stop now</th><th>Cushion</th><th class="l">Verdict</th></tr></thead>
+    <tbody>
+    {% for r in ladder %}
+    <tr>
+      <td class="l">{{ sym(r.symbol, r.name) }}</td>
+      <td>{{ r.close|money }}</td>
+      <td>{{ r.entry|money }}<div class="small muted">{{ r.first_day }}{% if r.from_statement %} · statement{% endif %}</div></td>
+      <td>{{ chg(r.move_pct, 1) }}<div class="small muted">{{ r.r_multiple|signed(1) }}R</div></td>
+      <td>{{ r.initial|money }}<div class="small muted">−{{ r.stop_pct|money(0) }}%</div></td>
+      <td class="{{ 'pos' if r.highest and r.highest >= r.be_trigger }}">{{ r.be_trigger|money }}<div class="small muted">then {{ r.break_even|money }}</div></td>
+      <td class="{{ 'pos' if r.close >= r.target }}">{{ r.target|money }}</td>
+      <td>{{ r.highest|money }}</td>
+      <td><b>{{ r.stop|money }}</b><div class="small muted">{{ r.stage }}</div></td>
+      <td>{{ chg(r.cushion, 1) }}</td>
+      <td class="l">{{ badge(r.verdict) }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="small muted">Green cells are levels already reached. A negative cushion means the close is under the stop, which is what makes a Sell. “statement” marks positions loaded from the broker statement: their entry is your average cost and the trail starts from that date.</p>
+</div>
+{% endif %}
+
+<div class="section">
+  <div class="section-head"><h2>How a verdict is decided</h2><span class="hint">Rules are checked top to bottom; the first that matches wins</span></div>
+  <div class="grid2">
+    <div class="card pad">
+      <h3 style="margin:0 0 4px">Holdings</h3>
+      <ol class="rules-list">
+        {% for rid, v, text in hrules %}
+        <li><span class="i">{{ loop.index }}</span><span>{{ badge(v) }}</span><span>{{ text }}</span><span class="c"><b>{{ hcount[rid] }}</b> today</span></li>
+        {% endfor %}
+      </ol>
+    </div>
+    <div class="card pad">
+      <h3 style="margin:0 0 4px">Watchlist and market</h3>
+      <ol class="rules-list">
+        {% for rid, v, text in erules %}
+        <li><span class="i">{{ loop.index }}</span><span>{{ badge(v) }}</span><span>{{ text }}</span><span class="c"><b>{{ ecount[rid].watch }}</b> watch · <b>{{ ecount[rid].scan }}</b> market</span></li>
+        {% endfor %}
+      </ol>
+      {% if missing %}
+      <h3 style="margin:16px 0 6px; font-size:14px">Which entry check holds stocks back</h3>
+      <table class="small">
+        <thead><tr><th class="l">Check</th><th>Fails</th><th>Only this one fails</th></tr></thead>
+        <tbody>{% for m in missing %}<tr><td class="l">{{ m.check }}</td><td>{{ m.fails }}</td><td><b>{{ m.only }}</b>{% if m.above is defined and m.only %}<div class="small muted">{{ m.above }} above, {{ m.only - m.above }} below</div>{% endif %}</td></tr>{% endfor %}</tbody>
+      </table>
+      <p class="small muted" style="margin-bottom:0">“Only this one fails” are near misses: loosening that one check would turn them into Enter while the market is in an uptrend.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>How the score is built</h2><span class="hint">12 rules, −100 to +100. Today's bars: share of all stocks the rule scored plus or minus.</span></div>
+  <div class="card table-wrap"><table>
+    <thead><tr><th class="l">Group</th><th class="l">Looks at</th><th class="l">Points</th><th class="l">Today, across {{ n_scored }} stocks</th><th>Plus</th><th>Minus</th><th>Avg pts</th></tr></thead>
+    <tbody>
+    {% for r in rules %}
+    <tr>
+      <td class="l">{% if loop.first or rules[loop.index0 - 1].group != r.group %}<b>{{ r.group }}</b><div class="small faint">up to ±{{ group_max[r.group] }}</div>{% endif %}</td>
+      <td class="l">{{ r.what }}{% if r.one_sided %} <span class="chip" title="Same sign for 85%+ of stocks today">one-sided</span>{% endif %}</td>
+      <td class="l wrap small muted">{{ r.points }}</td>
+      <td class="l"><div class="hitbar"><i class="p" style="width:{{ r.pos_pct|round(1) }}%"></i><i style="flex:1"></i><i class="n" style="width:{{ r.neg_pct|round(1) }}%"></i></div></td>
+      <td class="pos">{{ r.pos }}</td><td class="neg">{{ r.neg }}</td>
+      <td>{{ r.avg|signed(1) }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="small muted">The score only describes the chart. Verdicts use it in two places: a holding needs <b>{{ '%+d'|format(add_min) }}</b> or more for Add, and a watchlist or market stock at <b>{{ '%+d'|format(avoid_max) }}</b> or below is Avoid. Stops, targets and entry checks decide everything else.</p>
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>Score spread</h2>
+    <span class="hint">Average score by verdict: {% for v, a in avg_by_verdict.items()|sort(attribute='1', reverse=true) %}{{ v }} {{ '%+d'|format(a|round|int) }}{{ ' · ' if not loop.last }}{% endfor %}</span></div>
+  <div class="card">
+    <div class="hist">
+      {% for b in dist %}
+      <div class="col" title="{{ b.n }} stocks scored {{ b.lo }} to {{ b.hi }}{% if b.mine %}, {{ b.mine }} of yours{% endif %}">
+        <div class="cnt">{{ b.n or '' }}</div>
+        <div class="bar {{ 'pos' if b.lo >= 0 else 'neg' }}" style="height: {{ b.h|round(1) }}%">{% if b.mine %}<i class="mine" style="height: {{ (100 * b.mine / b.n)|round(1) }}%"></i>{% endif %}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="hist-x">{% for b in dist %}<span>{{ '%+d'|format(b.lo) }}</span>{% endfor %}</div>
+    <div class="legend-row"><span><i style="background:color-mix(in srgb, var(--sell) 45%, transparent)"></i>Negative score</span><span><i style="background:color-mix(in srgb, var(--buy) 45%, transparent)"></i>Positive score</span><span><i style="background:var(--accent)"></i>Your holdings and watchlist</span></div>
+  </div>
+</div>
+
+{% if whatif %}
+<div class="section">
+  <div class="section-head"><h2>What if you changed a setting?</h2><span class="hint">Today's verdicts re-run with one setting changed. Nothing is saved.</span></div>
+  <div class="grid2">
+    <div class="card table-wrap"><table>
+      <thead><tr><th class="l">Watchlist and market ({{ whatif.n_entries }})</th><th>Enter</th><th>on watchlist</th><th>Wait</th><th>Avoid</th></tr></thead>
+      <tbody>{% for label, c, cur in whatif.entries %}
+      <tr class="{{ 'current' if cur }}"><td class="l wrap">{{ label }}</td><td class="pos">{{ c.Enter }}</td><td>{{ c.watch_enter }}</td><td>{{ c.Wait }}</td><td>{{ c.Avoid }}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+    {% if whatif.n_holdings %}
+    <div class="card table-wrap"><table>
+      <thead><tr><th class="l">Holdings ({{ whatif.n_holdings }})</th><th>Sell</th><th>Trim</th><th>Add</th><th>Hold</th></tr></thead>
+      <tbody>{% for label, c, cur in whatif.holdings %}
+      <tr class="{{ 'current' if cur }}"><td class="l wrap">{{ label }}</td><td class="neg">{{ c.Sell }}</td><td>{{ c.Trim }}</td><td>{{ c.Add }}</td><td>{{ c.Hold }}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+  </div>
+  <p class="small muted">A wider stop turns fewer holdings into Sell but loses more when it is hit, and sizes new positions smaller. Change a setting on the <a href="/settings">Settings</a> page, or one stock's stop on <a href="/holdings">Holdings</a>.</p>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

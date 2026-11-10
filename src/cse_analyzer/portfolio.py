@@ -141,7 +141,8 @@ def build_portfolio(conn: sqlite3.Connection) -> Portfolio:
             entry_price=p["paid"] / p["qty"],
             first_day=p["first"],
             stop_loss_pct=(o["stop_loss_pct"] if o and o["stop_loss_pct"] is not None else default_stop),
-            stop_price=o["stop_price"] if o else None,
+            # A stored trailing stop only applies to the position it was set for.
+            stop_price=o["stop_price"] if o and o["stop_entry_day"] == p["first"] else None,
             fee_rate=fee_rate,
         )
         row = conn.execute(
