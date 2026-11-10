@@ -12,7 +12,7 @@ Decision support only; it never places trades.
 | 1. Data probe + 1-year backfill | Done |
 | 2. Core app: trade import, holdings, P/L | Done |
 | 3. Daily technical analysis + report | Done |
-| 4. systemd timer + desktop notification | Not started |
+| 4. systemd timer + desktop notification | Done |
 | 5. Weekly fundamentals and news | Announcements stored; scoring not started |
 | 6. Backtest, signal log, regime filter, AI summary | Not started |
 
@@ -30,6 +30,33 @@ docker compose up -d web               # http://localhost:8080
 
 Data lives in `./data/cse.db` (SQLite, git-ignored).
 
+## Daily schedule and notification
+
+```bash
+./scripts/install-timer.sh               # weekdays 10:00 Colombo time
+./scripts/install-timer.sh --uninstall
+```
+
+This installs a systemd user timer that runs `scripts/cse-daily.sh` on weekdays
+at 10:00 Asia/Colombo time. If the laptop was off or asleep at 10:00, it runs as
+soon as the laptop is back (`Persistent=true`). The script waits for Docker and
+for www.cse.lk, starts the web report if needed, fetches and analyses, then shows
+a desktop notification such as "CSE: 1 Sell · 2 Trim" listing the stocks. Click
+it, or its "Open report" button, to open http://localhost:8080. A notification
+with a Sell stays on screen until you dismiss it. If the run fails, you get a
+"CSE daily run failed" notification instead. A second run on the same day does
+nothing, so catch-up runs never notify twice.
+
+```bash
+systemctl --user list-timers cse-daily.timer   # when it runs next
+journalctl --user -u cse-daily -n 50           # last run's log
+./scripts/cse-daily.sh --force                 # run now by hand
+docker compose --profile job run --rm job summary   # the notification text, as JSON
+```
+
+The 10:00 run picks up the previous trading day's close; today's bar is only
+final after 14:45.
+
 ## Develop
 
 ```bash
@@ -45,7 +72,9 @@ see [docs/cse-api.md](docs/cse-api.md).
 - `src/cse_analyzer/cse_client.py` – cse.lk API client and parsers
 - `src/cse_analyzer/collector.py` – fetch + store, catch-up guard, staleness check
 - `src/cse_analyzer/db.py` – SQLite schema and default settings (10% stop, 3x ATR trail, 1.12% fees…)
-- `src/cse_analyzer/cli.py` – `cse backfill | daily | analyze | status`
+- `src/cse_analyzer/cli.py` – `cse backfill | daily | analyze | status | summary`
+- `src/cse_analyzer/notify.py` – the daily notification text
+- `scripts/cse-daily.sh`, `scripts/install-timer.sh`, `deploy/systemd/` – timer, run script, notification
 - `src/cse_analyzer/trades.py` – symbol matching, paste and .xlsx parsing, duplicate-safe saving
 - `src/cse_analyzer/portfolio.py` – holdings, average cost, net P/L, break-even, stops, weights
 - `src/cse_analyzer/indicators.py` – moving averages, RSI, MACD, ATR (pandas only)
