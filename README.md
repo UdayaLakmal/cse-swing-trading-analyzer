@@ -103,9 +103,17 @@ and its points.
 
 Stops: entry minus the stop % (default 10%); after +1R the stop moves to
 break-even plus fees, then trails the highest close since entry by 3x ATR(14).
-The stop is stored and never moves down. Enter signals are muted to Wait when
+The stop is stored and never moves down from day to day; if you change a
+stop setting (stop %, break-even step, trail multiple or fee rate), stored stops
+are worked out again from the new values. Enter signals are muted to Wait when
 the ASPI is below its 200-day average. Every number above is editable on the
 Settings page, and every daily verdict is kept in the `signals` table.
+
+Settings are checked against sensible ranges before saving (a stop of 150% or
+an RSI zone of 60-40 is refused, with the reason next to the field). Every save
+is kept in `settings_history` and can be restored from the Settings page, which
+also has **Reset to defaults**, named presets (`settings_presets`, e.g. "Normal"
+and "Wide stops") and a .json download of the settings and presets.
 
 The **Strategy** page (`/strategy`) explains all of this against today's
 signals, to help tune it: the strategy in five steps with your settings, a

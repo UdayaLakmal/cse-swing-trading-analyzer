@@ -1,9 +1,29 @@
 {% extends "base.html" %}
 {% block title %}Settings · CSE Analyzer{% endblock %}
+{% block head %}
+<style>
+.field { margin-bottom: 14px; }
+.field .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.field input { max-width: 200px; }
+.field.err input { border-color: var(--sell); }
+.field .errmsg { color: var(--sell); font-size: 12px; margin-top: 4px; font-weight: 500; }
+.chip.changed { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
+.diff { font-size: 12px; line-height: 1.6; }
+.diff b { font-weight: 600; }
+.inline { display: inline; }
+.preset { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.preset:last-of-type { border-bottom: 0; }
+.preset .acts { display: flex; gap: 6px; }
+</style>
+{% endblock %}
 {% block body %}
 <div class="page-head">
-  <div><h1>Settings</h1><div class="sub">Your rules. Saving re-scores everything straight away.</div></div>
+  <div><h1>Settings</h1><div class="sub">Your rules. Saving re-scores every stock straight away, and every save is kept below so you can go back.</div></div>
+  <a class="btn secondary sm" href="/strategy">See the effect on the Strategy page →</a>
 </div>
+
+{% if errors %}<div class="alert warn">Nothing was saved: {{ errors|length }} value{{ 's' if errors|length != 1 }} need{{ 's' if errors|length == 1 }} fixing below.</div>{% endif %}
 
 <form method="post" action="/settings">
   <div class="grid2">
@@ -11,15 +31,82 @@
     <div class="card pad">
       <h2 style="margin-bottom:14px">{{ section }}</h2>
       {% for key, label, unit, help in fields %}
-      <div style="margin-bottom:14px">
+      {% set v = values.get(key, '') %}
+      <div class="field {{ 'err' if key in errors }}">
         <label for="{{ key }}">{{ label }}{% if unit %} <span class="faint">({{ unit }})</span>{% endif %}</label>
-        <input id="{{ key }}" name="{{ key }}" value="{{ values.get(key, '') }}" inputmode="decimal" required style="max-width:200px">
-        {% if help %}<div class="small muted" style="margin-top:4px">{{ help }}</div>{% endif %}
+        <div class="row">
+          <input id="{{ key }}" name="{{ key }}" value="{{ v }}" inputmode="decimal" required aria-invalid="{{ 'true' if key in errors else 'false' }}">
+          {% if key not in errors %}
+            {% if v|string != defaults[key] %}<span class="chip changed" title="Differs from the default">default {{ nice(defaults[key]|float) }}</span>
+            {% else %}<span class="small faint">default</span>{% endif %}
+          {% endif %}
+        </div>
+        {% if key in errors %}<div class="errmsg">{{ errors[key] }}</div>{% endif %}
+        <div class="small muted" style="margin-top:4px">{% if help %}{{ help }} {% endif %}<span class="faint">Allowed {{ nice(limits[key][0]) }} to {{ nice(limits[key][1]) }}.</span></div>
       </div>
       {% endfor %}
     </div>
   {% endfor %}
   </div>
-  <p style="margin-top:16px"><button class="btn">Save settings</button></p>
+  <div class="bar">
+    <button class="btn">Save settings</button>
+    <a class="btn secondary" href="/settings">Discard edits</a>
+  </div>
 </form>
+
+<div class="section">
+  <div class="grid2">
+    <div class="card pad">
+      <h2 style="margin-bottom:4px">Reset to defaults</h2>
+      <p class="small muted" style="margin-top:0">Puts every value back to the default shown next to it. Your current values stay in the history below, so this can be undone. Per-stock stops on the Holdings page are not touched.</p>
+      <form method="post" action="/settings/reset" onsubmit="return confirm('Reset every strategy setting to its default? You can undo this from the history.')">
+        <button class="btn secondary">Reset to defaults</button>
+      </form>
+    </div>
+
+    <div class="card pad">
+      <h2 style="margin-bottom:4px">Saved presets</h2>
+      <p class="small muted" style="margin-top:0">Keep a named copy of the current settings, e.g. “Normal” or “Wide stops”, and switch between them.</p>
+      {% for p in presets %}
+      <div class="preset">
+        <div><b>{{ p.name }}</b><div class="small muted">Saved {{ p.saved_at }}{% if p['values'] == cur %} · same as current{% endif %}</div></div>
+        <div class="acts">
+          <form method="post" action="/settings/presets/load" class="inline"><input type="hidden" name="name" value="{{ p.name }}"><button class="btn secondary sm" {{ 'disabled' if p['values'] == cur }}>Load</button></form>
+          <form method="post" action="/settings/presets/delete" class="inline" onsubmit='return confirm({{ ("Delete the preset “" ~ p.name ~ "”?")|tojson }})'><input type="hidden" name="name" value="{{ p.name }}"><button class="btn ghost sm">Delete</button></form>
+        </div>
+      </div>
+      {% endfor %}
+      <form method="post" action="/settings/presets" style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap">
+        <input name="name" placeholder="Preset name" maxlength="40" required style="max-width:220px">
+        <button class="btn secondary">Save current as preset</button>
+      </form>
+      <p class="small" style="margin-bottom:0"><a href="/settings/export.json">Download settings and presets (.json)</a></p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>Change history</h2><span class="hint">Every save, newest first. Restoring adds a new entry, so nothing is lost.</span></div>
+  {% if history %}
+  <div class="card table-wrap"><table>
+    <thead><tr><th class="l">When</th><th class="l">What</th><th class="l">Changes</th><th></th></tr></thead>
+    <tbody>
+    {% for h in history %}
+    <tr>
+      <td class="l small">#{{ h.id }}<div class="muted">{{ h.saved_at }}</div></td>
+      <td class="l small">{{ h.note }}</td>
+      <td class="l wrap diff">
+        {% for k, old, new in h.diff %}{{ labels.get(k, k) }}: <span class="muted">{{ old }}</span> → <b>{{ new }}</b>{{ '' if loop.last else ' · ' }}{% else %}<span class="muted">{{ 'Starting values' if h.note.startswith('Settings before') else 'No change' }}</span>{% endfor %}
+      </td>
+      <td>{% if loop.first and h['values'] == cur %}<span class="chip">Current</span>
+        {% elif h['values'] == cur %}<span class="small faint">same as current</span>
+        {% else %}<form method="post" action="/settings/restore/{{ h.id }}" onsubmit="return confirm('Restore the settings from #{{ h.id }}?')"><button class="btn secondary sm">Restore</button></form>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="card empty"><b>No changes yet</b>Each time you save, the new values are kept here and can be restored.</div>
+  {% endif %}
+</div>
 {% endblock %}

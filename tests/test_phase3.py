@@ -187,7 +187,7 @@ def test_pages_render(conn, tmp_path, monkeypatch):
     assert "Avoid" in c.get("/watchlist").text
     assert "Settings saved" in c.post("/settings", data={k: v for k, v in db.DEFAULT_SETTINGS.items()} | {"stop_loss_pct": "8"}).text
     assert conn.execute("SELECT value FROM settings WHERE key='stop_loss_pct'").fetchone()[0] == "8"
-    assert "not a number" in c.post("/settings", data={k: v for k, v in db.DEFAULT_SETTINGS.items()} | {"stop_loss_pct": "x"}).text
+    assert "not a number" in c.post("/settings", data={k: v for k, v in db.DEFAULT_SETTINGS.items()} | {"stop_loss_pct": "x"}).text  # re-rendered with the error
     assert c.get("/report/today", follow_redirects=False).status_code == 307
 
 
