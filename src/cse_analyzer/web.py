@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from jinja2 import Undefined
 
-from . import analysis, charts, collector, db, settings_store, strategy
+from . import analysis, charts, collector, db, fundamentals, news, settings_store, strategy
 from .cli import status
 from .config import load_settings
 from .portfolio import build_portfolio
@@ -119,11 +119,18 @@ def today_page(request: Request, conn=Depends(get_conn)):
         key=lambda x: (VERDICT_ORDER[x["verdict"]], -x["score"]),
     )
     ideas = sorted((x for x in sigs if x["list"] == "scan" and x["verdict"] == "Enter"), key=lambda x: -x["score"])[:6]
+    mine = [h.symbol for h in pf.holdings] + [w["symbol"] for w in watch]
+    evs = fundamentals.events(conn, mine, days=10)
+    coming = sorted(((s_, e) for s_, lst in evs.items() for e in lst if e.get("upcoming")), key=lambda x: x[1]["day"])
+    lately = sorted(((s_, e) for s_, lst in evs.items() for e in lst if not e.get("upcoming")),
+                    key=lambda x: x[1]["day"], reverse=True)[:8]
+    headlines = news.latest(conn, mine, days=7, limit=8)
     sparks = {k: charts.sparkline(v) for k, v in closes(conn, [r["h"].symbol for r in rows] + [w["symbol"] for w in watch], 40).items()}
     prev_mv = pf.market_value - day_change
     return render(
         request, "today.html", conn, active="today", day=day, pf=pf, rows=rows, watch=watch, actions=actions,
-        ideas=ideas, regime=regime, sparks=sparks, day_change=day_change,
+        ideas=ideas, regime=regime, sparks=sparks, day_change=day_change, coming=coming, lately=lately,
+        headlines=headlines,
         day_change_pct=(100 * day_change / prev_mv) if prev_mv else None, settings=s,
         analysis_behind=bool(day and (latest := collector.latest_price_day(conn)) and day < latest.isoformat()),
         scan_counts={v: sum(1 for x in sigs if x["list"] == "scan" and x["verdict"] == v) for v in ("Enter", "Wait", "Avoid")},
@@ -184,15 +191,101 @@ def stock_page(symbol: str, request: Request, conn=Depends(get_conn)):
     groups: dict[str, list] = {}
     for comp in (sig or {}).get("components", []):
         groups.setdefault(comp["group"], []).append(comp)
-    base = stock["symbol"].split(".")[0]
-    news = conn.execute(
-        """SELECT * FROM announcements WHERE symbol IN (?, ?) OR company = ?
-           ORDER BY fetched_at DESC, id DESC LIMIT 8""", (base, symbol, stock["name"])).fetchall()
+    closes_now = latest_closes(conn, [symbol])
+    val = fundamentals.valuations(conn, closes_now).get(symbol)
+    evs = fundamentals.events(conn, [symbol], days=400)[symbol][:12]
+    headlines = news.latest(conn, [symbol], days=60, limit=10)
     watched = conn.execute("SELECT * FROM watchlist WHERE symbol = ?", (symbol,)).fetchone()
     trades = conn.execute("SELECT * FROM trades WHERE symbol = ? ORDER BY day DESC, id DESC", (symbol,)).fetchall()
     return render(request, "stock.html", conn, active="", stock=stock, sig=sig, f=(sig or {}).get("features") or {},
-                  chart=chart, groups=groups, holding=holding, news=news, watched=watched, trades=trades,
+                  chart=chart, groups=groups, holding=holding, events=evs, headlines=headlines, val=val,
+                  watched=watched, trades=trades,
                   settings=settings_of(conn))
+
+
+# --- Fundamentals & news ---------------------------------------------------------
+
+
+def latest_closes(conn, symbols: list[str]) -> dict[str, float]:
+    out = {}
+    for sym in symbols:
+        r = conn.execute("""SELECT p.close FROM prices_daily p JOIN stocks s USING (stock_id)
+                            WHERE s.symbol = ? ORDER BY p.day DESC LIMIT 1""", (sym,)).fetchone()
+        if r and r[0]:
+            out[sym] = r[0]
+    return out
+
+
+@app.get("/fundamentals", response_class=HTMLResponse)
+def fundamentals_page(request: Request, conn=Depends(get_conn)):
+    tracked = fundamentals.tracked_symbols(conn)
+    extra = [r[0] for r in conn.execute(
+        "SELECT symbol FROM fundamentals WHERE eps_ttm IS NOT NULL OR nav_manual IS NOT NULL")]
+    syms = sorted(set(tracked) | {s for s in extra if conn.execute("SELECT 1 FROM stocks WHERE symbol = ?", (s,)).fetchone()})
+    vals = fundamentals.valuations(conn, latest_closes(conn, syms))
+    held = {h.symbol for h in build_portfolio(conn).holdings}
+    watch = {r[0] for r in conn.execute("SELECT symbol FROM watchlist")}
+    names = dict(conn.execute("SELECT symbol, name FROM stocks"))
+    evs = fundamentals.events(conn, syms, days=60)
+    run = conn.execute("SELECT * FROM runs WHERE kind = 'weekly' ORDER BY id DESC LIMIT 1").fetchone()
+    rows = [{"symbol": s, "name": names.get(s, s), "v": vals.get(s),
+             "role": "holding" if s in held else ("watchlist" if s in watch else ("idea" if s in tracked else "kept")),
+             "events": evs.get(s, [])} for s in syms]
+    order = {"holding": 0, "watchlist": 1, "idea": 2, "kept": 3}
+    rows.sort(key=lambda r: (order[r["role"]], r["symbol"]))
+    upcoming = sorted(((r["symbol"], e) for r in rows for e in r["events"] if e.get("upcoming")), key=lambda x: x[1]["day"])
+    recent = sorted(((r["symbol"], e) for r in rows for e in r["events"] if not e.get("upcoming")),
+                    key=lambda x: x[1]["day"], reverse=True)[:25]
+    return render(request, "fundamentals.html", conn, active="fundamentals", rows=rows, market=fundamentals.market(conn),
+                  upcoming=upcoming, recent=recent, news=news.latest(conn, syms, days=21, limit=40),
+                  run=dict(run) if run else None, names=names)
+
+
+def _num_or_none(text: str, *, positive: bool = False) -> float | None:
+    text = (text or "").strip().replace(",", "")
+    if not text:
+        return None
+    v = float(text)  # ValueError handled by the caller
+    if positive and v <= 0:
+        raise ValueError
+    return v
+
+
+@app.post("/fundamentals/refresh")
+def fundamentals_refresh(conn=Depends(get_conn)):
+    """Same as the weekly job, run now: new announcements, dividends and
+    report PDFs for tracked stocks, then news."""
+    s = load_settings()
+    from .cse_client import CseClient
+
+    try:
+        with CseClient(s.cse_base_url, s.request_delay_s, s.http_timeout_s) as client:
+            st = fundamentals.collect_weekly(conn, client)
+        ns = news.collect_news(conn, fundamentals.tracked_symbols(conn), delay_s=0.5)
+    except Exception as e:  # noqa: BLE001 - show the reason instead of a 500
+        return back("/fundamentals", f"Refresh failed: {e}")
+    analysis.run_analysis(conn)
+    return back("/fundamentals", f"Refreshed {st['stocks']} stocks: {st['nav_new']} reports read, "
+                                 f"{st['dividends']} new dividends, {ns['saved']} new headlines.")
+
+
+@app.post("/fundamentals/{symbol}")
+def fundamentals_save(symbol: str, eps: str = Form(""), nav: str = Form(""), note: str = Form(""),
+                      next: str = Form("/fundamentals"), conn=Depends(get_conn)):
+    if not conn.execute("SELECT 1 FROM stocks WHERE symbol = ?", (symbol,)).fetchone():
+        raise HTTPException(404, "Unknown symbol")
+    nxt = next if next.startswith("/") and not next.startswith("//") else "/fundamentals"
+    try:
+        e = _num_or_none(eps)
+    except ValueError:
+        return back(nxt, f"{symbol}: EPS must be a number such as 2.35 or -0.40")
+    try:
+        n = _num_or_none(nav, positive=True)
+    except ValueError:
+        return back(nxt, f"{symbol}: net assets per share must be a number above zero")
+    fundamentals.save_manual(conn, symbol, eps=e, nav=n, note=note.strip()[:200] or None)
+    analysis.run_analysis(conn)
+    return back(nxt, f"{symbol.split('.')[0]}: saved. The valuation and analysis are refreshed.")
 
 
 # --- Market scan -----------------------------------------------------------

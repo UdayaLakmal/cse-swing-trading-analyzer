@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% from "_macros.html" import sym %}
+{% block title %}Fundamentals & news · CSE Analyzer{% endblock %}
+{% block head %}
+<style>
+.gcheap, .gleans-cheap { background: var(--buy-soft); color: var(--buy); }
+.gleans-expensive { background: var(--warn-soft); color: var(--warn); }
+.gexpensive { background: var(--sell-soft); color: var(--sell); }
+.gfair, .gunknown { background: var(--neutral-soft); color: var(--muted); }
+.edit { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
+.edit input { width: 78px; padding: 5px 7px; font-size: 12px; }
+.edit input.note { width: 120px; }
+.evt { display: flex; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 13px; align-items: baseline; }
+.evt:last-child { border-bottom: 0; }
+.evt .d { flex: none; width: 82px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.evt .s { flex: none; width: 52px; font-weight: 600; }
+.evt .t { flex: 1; min-width: 0; }
+.evt.imp .lbl { color: var(--warn); font-weight: 600; }
+.pts { margin: 0; padding-left: 18px; font-size: 12px; color: var(--muted); }
+.why-grade { cursor: help; }
+</style>
+{% endblock %}
+{% block body %}
+{% set gclass = {'Cheap': 'gcheap', 'Leans cheap': 'gleans-cheap', 'Fair': 'gfair', 'Leans expensive': 'gleans-expensive', 'Expensive': 'gexpensive', 'Unknown': 'gunknown'} %}
+<div class="page-head">
+  <div><h1>Fundamentals &amp; news</h1>
+    <div class="sub">Valuation, dividends, company events and headlines for your holdings, watchlist and today’s Enter ideas. This is context: verdicts still come from the price rules.</div></div>
+  <form method="post" action="/fundamentals/refresh" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Fetching… (about a minute)'">
+    <button class="btn secondary">↻ Fetch now</button>
+  </form>
+</div>
+
+<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px">
+  {% if market %}
+  <span class="chip" title="From the CSE weekly report of {{ market.report_day }}">Market P/E <b>{{ market.per|money }}</b> · P/BV <b>{{ market.pbv|money }}</b> · Yield <b>{{ market.dy|money }}%</b>
+    <a href="{{ market.source }}" target="_blank" rel="noopener" class="faint">week of {{ market.report_day }}</a></span>
+  {% else %}<span class="chip">Market ratios not fetched yet</span>{% endif %}
+  {% if run %}<span class="chip">Last fetch {{ run.started_at }} UTC · {{ run.status }}</span>
+  {% else %}<span class="chip">Not fetched yet: press “Fetch now” or wait for the weekly run</span>{% endif %}
+</div>
+
+<div class="card table-wrap">
+  {% if rows %}
+  <table>
+    <thead><tr>
+      <th class="l">Stock</th><th>Close</th><th title="Close ÷ trailing 12-month EPS you entered">P/E</th>
+      <th title="Close ÷ net assets per share">P/BV</th><th title="Cash dividends with an ex-date in the last 12 months ÷ close">Yield</th>
+      <th class="l">Valuation</th><th class="l">Next ex-dividend</th><th class="l">Net assets from</th><th class="l">Your figures: EPS (12m) · NAV · note</th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}{% set v = r.v %}
+    <tr>
+      <td class="l">{{ sym(r.symbol, r.name) }}<div class="small faint">{{ r.role }}</div></td>
+      {% if v %}
+      <td>{{ v.close|money }}</td>
+      <td>{% if v.loss %}<span class="neg">loss</span>{% elif v.pe is not none %}{{ v.pe|money(1) }}{% else %}<span class="faint" title="Enter the trailing 12-month EPS to see P/E">–</span>{% endif %}</td>
+      <td>{% if v.pbv is not none %}<span class="{{ 'faint' if v.suspect }}" title="{{ 'Not used in the grade: ' ~ ('the report is old' if v.old_report else 'looks implausible, check the PDF') if v.suspect }}">{{ v.pbv|money(2) }}{{ ' ⚠' if v.suspect }}</span>{% else %}–{% endif %}</td>
+      <td>{% if v.dy is not none %}{{ v.dy|money(1) }}%<div class="small muted">Rs {{ v.dps|money }}</div>{% else %}–{% endif %}</td>
+      <td class="l"><span class="badge {{ gclass[v.grade] }} why-grade" title="{% for t, p in v.points %}{{ '%+d'|format(p) }} {{ t }}&#10;{% endfor %}">{{ v.grade }}</span></td>
+      <td class="l small">{% if v.next_div %}{{ v.next_div.xd }}<div class="muted">Rs {{ v.next_div.voting_dps if '.X' not in r.symbol else v.next_div.non_voting_dps }} a share</div>{% else %}<span class="faint">–</span>{% endif %}</td>
+      <td class="l small wrap">{% if v.nav_from == 'manual' %}Your figure{% if v.nav_auto %}<div class="muted">report says {{ v.nav_auto|money }}</div>{% endif %}
+        {% elif v.nav_source %}<a href="{{ v.nav_source }}" target="_blank" rel="noopener">{{ (v.nav_period or 'Latest report')|replace('Interim Financial Statements for the ', '')|truncate(42) }}</a>
+          {% if not v.nav_auto %}<div class="neg">NAV not found in the PDF</div>{% elif v.old_report %}<div class="neg">Old report</div>{% endif %}
+        {% else %}<span class="faint">Not read yet</span>{% endif %}</td>
+      {% else %}
+      <td colspan="7" class="l muted small">No prices stored</td>
+      {% endif %}
+      <td class="l">
+        <form method="post" action="/fundamentals/{{ r.symbol }}" class="edit">
+          <input name="eps" value="{{ v.eps if v and v.eps is not none else '' }}" placeholder="EPS" inputmode="decimal" aria-label="Trailing 12-month EPS for {{ r.symbol }}">
+          <input name="nav" value="{{ v.nav_manual if v and v.nav_manual else '' }}" placeholder="{{ (v.nav_auto|money) if v and v.nav_auto else 'NAV' }}" inputmode="decimal" aria-label="Net assets per share override for {{ r.symbol }}">
+          <input name="note" class="note" value="{{ v.note if v and v.note else '' }}" placeholder="note" maxlength="200" aria-label="Note for {{ r.symbol }}">
+          <button class="btn secondary sm">Save</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty"><b>Nothing tracked yet</b>Add holdings or watchlist stocks; their fundamentals are fetched weekly.</div>
+  {% endif %}
+</div>
+<p class="small muted">EPS is the sum of the last four quarters’ basic EPS; the latest figures are in the report linked in each row. Leave NAV empty to use the figure read from the report. Hover a valuation for its reasons.</p>
+
+<div class="grid2 section">
+  <div>
+    <div class="section-head"><h2>Coming up</h2><span class="hint">ex-dividend dates</span></div>
+    <div class="card">
+      {% for s, e in upcoming %}
+      <div class="evt imp"><span class="d">{{ e.day }}</span><a class="s" href="/stock/{{ s }}">{{ s.split('.')[0] }}</a><span class="t"><span class="lbl">{{ e.label }}</span> · {{ e.title }}</span></div>
+      {% else %}<div class="empty small">No ex-dividend dates ahead for these stocks.</div>{% endfor %}
+    </div>
+
+    <div class="section-head" style="margin-top:20px"><h2>Recent announcements</h2><span class="hint">last 60 days</span></div>
+    <div class="card">
+      {% for s, e in recent %}
+      <div class="evt {{ 'imp' if e.important }}"><span class="d">{{ e.day }}</span><a class="s" href="/stock/{{ s }}">{{ s.split('.')[0] }}</a>
+        <span class="t"><span class="lbl">{{ e.label }}</span>{% if e.title %} · {% if e.url %}<a href="{{ e.url }}" target="_blank" rel="noopener">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}{% endif %}</span></div>
+      {% else %}<div class="empty small">No announcements stored yet.</div>{% endfor %}
+    </div>
+  </div>
+  <div>
+    <div class="section-head"><h2>News</h2><span class="hint">last 3 weeks · matched by company name</span></div>
+    <div class="card">
+      {% for n in news %}
+      <div class="evt"><span class="d">{{ (n.published or n.fetched_at)[:10] }}</span><a class="s" href="/stock/{{ n.symbol }}">{{ n.symbol.split('.')[0] }}</a>
+        <span class="t"><a href="{{ n.link }}" target="_blank" rel="noopener">{{ n.title }}</a> <span class="faint small">{{ n.source or '' }}</span></span></div>
+      {% else %}<div class="empty small">No headlines yet. News is fetched with the daily run.</div>{% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="section card pad">
+  <h2 style="margin-bottom:6px">How the valuation grade works</h2>
+  <ul class="pts" style="font-size:13px">
+    <li>P/E and P/BV each score <b>+1</b> at or below {{ '%g'|format(0.75 * 100) }}% of the market’s figure and <b>−1</b> at or above 150% of it. A loss (EPS at or below zero) scores −1.</li>
+    <li>Dividend yield scores <b>+1</b> when it is at least 1.25 times the market’s yield.</li>
+    <li>Total +2 or more is <b>Cheap</b>, +1 <b>Leans cheap</b>, 0 <b>Fair</b>, −1 <b>Leans expensive</b>, −2 or less <b>Expensive</b>. Without any figures it is <b>Unknown</b>.</li>
+    <li>Net assets per share is read from the “Net assets per share” line of the latest interim report. A figure from a report over 10 months old, or giving a P/BV outside 0.02 to 50, is shown with ⚠ and left out of the grade.</li>
+    <li>The grade and any ex-dividend date or major announcement (rights issue, split, trading halt, takeover offer) appear as context under the verdict. They do not change it.</li>
+  </ul>
+</div>
+{% endblock %}

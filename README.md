@@ -13,7 +13,7 @@ Decision support only; it never places trades.
 | 2. Core app: trade import, holdings, P/L | Done |
 | 3. Daily technical analysis + report | Done |
 | 4. systemd timer + desktop notification | Done |
-| 5. Weekly fundamentals and news | Announcements stored; scoring not started |
+| 5. Weekly fundamentals and news | Done |
 | 6. Backtest, signal log, regime filter, AI summary | Not started |
 
 ## Run
@@ -23,6 +23,8 @@ export UID GID=$(id -g)
 docker compose build
 docker compose run --rm job backfill   # first time: ~1 year of history, ~4 min
 docker compose run --rm job daily      # fetch + analyse; skips if today already ran; --force to rerun
+docker compose run --rm job weekly     # fundamentals: announcements, dividends, NAV, market ratios; --force to rerun
+docker compose run --rm job news       # news headlines for holdings and watchlist (also part of daily)
 docker compose run --rm job analyze    # re-score stored prices only (seconds)
 docker compose run --rm job status
 docker compose up -d web               # http://localhost:8080
@@ -55,7 +57,9 @@ docker compose --profile job run --rm job summary   # the notification text, as 
 ```
 
 The 10:00 run picks up the previous trading day's close; today's bar is only
-final after 14:45.
+final after 14:45. The same run fetches news and, once every 6 days, the weekly
+fundamentals (`cse weekly` skips itself otherwise, so there is no second timer).
+A failed weekly fetch adds a line to the notification but does not fail the run.
 
 ## Develop
 
@@ -72,7 +76,9 @@ see [docs/cse-api.md](docs/cse-api.md).
 - `src/cse_analyzer/cse_client.py` – cse.lk API client and parsers
 - `src/cse_analyzer/collector.py` – fetch + store, catch-up guard, staleness check
 - `src/cse_analyzer/db.py` – SQLite schema and default settings (10% stop, 3x ATR trail, 1.12% fees…)
-- `src/cse_analyzer/cli.py` – `cse backfill | daily | analyze | status | summary`
+- `src/cse_analyzer/cli.py` – `cse backfill | daily | weekly | news | analyze | status | summary`
+- `src/cse_analyzer/fundamentals.py` – dividends, NAV from report PDFs, market ratios, valuation grade, events
+- `src/cse_analyzer/news.py` – RSS feeds and Google News, company-name matching
 - `src/cse_analyzer/notify.py` – the daily notification text
 - `scripts/cse-daily.sh`, `scripts/install-timer.sh`, `deploy/systemd/` – timer, run script, notification
 - `src/cse_analyzer/trades.py` – symbol matching, paste and .xlsx parsing, duplicate-safe saving
@@ -81,7 +87,7 @@ see [docs/cse-api.md](docs/cse-api.md).
 - `src/cse_analyzer/analysis.py` – score, verdicts, trailing stops, regime filter, signal log
 - `src/cse_analyzer/charts.py` – server-side SVG charts (work offline)
 - `src/cse_analyzer/strategy.py` – Strategy page data: rule hit counts, exit ladders, what-if re-runs
-- `src/cse_analyzer/web.py` + `templates/` – Today, Holdings, Watchlist, Market scan, stock pages, Trades, Strategy, Settings
+- `src/cse_analyzer/web.py` + `templates/` – Today, Holdings, Watchlist, Market scan, stock pages, Trades, Fundamentals & news, Strategy, Settings
 
 ## How the analysis works
 
@@ -146,3 +152,35 @@ resolve to the voting share (`JKH` → `JKH.N0000`). Blank fees use the default
 rate (1.12% per side). A trade identical in date, symbol, side, quantity and
 price to a saved one is treated as a duplicate. If you really made two
 identical trades on one day, enter them as one trade with the combined quantity.
+
+## Fundamentals and news
+
+cse.lk publishes report PDFs, not figures, so the weekly job reads what can be
+read reliably for your holdings, watchlist and today's Enter ideas:
+
+| Figure | Source | How |
+|---|---|---|
+| Dividend per share, ex-date | Each cash dividend announcement (`getAnnouncementById`) | Automatic; new dividends for any stock are also picked up daily |
+| Net assets per share (NAV) | "Net assets per share" line of the latest interim report PDF | Automatic via `pdftotext`; shown with a link to the PDF. Reports over 10 months old, or a P/BV outside 0.02-50, are flagged and not graded |
+| Trailing 12-month EPS | You, on the Fundamentals page | EPS layouts differ too much between companies to read safely |
+| Market P/E, P/BV, yield | CSE weekly report PDF | Automatic |
+| Company events | `getAnnouncementByCompany`, last 13 months | Automatic |
+
+From these the **Fundamentals & news** page (`/fundamentals`) shows P/E,
+P/BV, 12-month dividend yield and a valuation grade (Cheap to Expensive: P/E
+and P/BV score +1 at ≤ 75% of the market's and -1 at ≥ 150%, a yield at least
+1.25x the market's scores +1). A figure you type in wins over the automatic one.
+
+News comes daily from EconomyNext and Daily Mirror Business (matched against
+every listed company's name) and from a Google News search per holding and
+watchlist stock. Names are matched longest first, so "John Keells Hotels" is
+not taken for John Keells Holdings; quote pages (Yahoo, TradingView,
+MarketScreener…) are dropped. Expect some noise: market wrap-ups mention many
+companies.
+
+None of this changes a verdict. It appears as **context** under it: the
+valuation, an ex-dividend date in the next 10 days (the price drops by about the
+dividend that day, which can touch a tight stop), and major announcements in the
+last 3 weeks (rights issue, split, trading halt, takeover offer). The Today page
+lists upcoming ex-dividend dates, recent announcements and headlines for your
+stocks, and the notification adds "Ex-dividend soon: …" for holdings.

@@ -18,6 +18,11 @@ CHECKS = [
     ("companyInfoSummery", {"symbol": "JKH.N0000"}, "reqSymbolInfo", {"symbol", "lastTradedPrice", "p12HiPrice"}),
     ("approvedAnnouncement", {}, "approvedAnnouncements", {"id", "company", "announcementCategory"}),
     ("getFinancialAnnouncement", {}, "reqFinancialAnnouncemnets", {"id", "symbol", "path", "fileText"}),
+    ("getAnnouncementByCompany", {"symbol": "JKH.N0000", "fromDate": "2025-01-01", "toDate": "2030-01-01"},
+     "reqCompanyAnnouncement", {"id", "announcementId", "announcementCategory"}),
+    ("getAnnouncementById", {"announcementId": 39867}, "reqBaseAnnouncement", {"symbol", "votingDivPerShare", "xd"}),
+    ("financials", {"symbol": "JKH.N0000"}, "infoQuarterlyData", {"path", "fileText", "uploadedDate"}),
+    ("cseWeekly", {}, "reqCseWeekly", {"path", "manual_date"}),
     ("aspiData", {}, None, {"value", "change"}),
     ("marketSummery", {}, None, {"tradeVolume", "shareVolume"}),
 ]

@@ -113,6 +113,55 @@ CREATE TABLE IF NOT EXISTS settings_history (
     values_json  TEXT NOT NULL
 );
 
+-- Cash dividends, one row per CSE announcement (amounts are per share, LKR).
+CREATE TABLE IF NOT EXISTS dividends (
+    announcement_id  INTEGER PRIMARY KEY,
+    base             TEXT NOT NULL,            -- JKH (applies to JKH.N0000 / JKH.X0000)
+    voting_dps       REAL,
+    non_voting_dps   REAL,
+    xd               TEXT,                     -- YYYY-MM-DD ex-dividend date
+    payment          TEXT,
+    announced        TEXT,
+    remarks          TEXT,
+    fetched_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Per-stock fundamentals: net assets per share read from the latest interim
+-- report, plus values you type in. A manual value wins over the automatic one.
+CREATE TABLE IF NOT EXISTS fundamentals (
+    symbol        TEXT PRIMARY KEY,
+    nav_auto      REAL,
+    nav_source    TEXT,                        -- PDF url the automatic NAV came from
+    nav_period    TEXT,                        -- e.g. Interim ... ended 30th September 2026
+    nav_report_day TEXT,                       -- date of that report (YYYY-MM-DD)
+    nav_checked   TEXT,                        -- when that PDF was last read
+    nav_manual    REAL,
+    eps_ttm       REAL,                        -- trailing 12-month EPS, typed in
+    note          TEXT,
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- Market-wide P/E, P/BV and dividend yield from the CSE weekly report.
+CREATE TABLE IF NOT EXISTS market_valuation (
+    report_day  TEXT PRIMARY KEY,
+    per         REAL,
+    pbv         REAL,
+    dy          REAL,
+    source      TEXT
+);
+
+-- Headlines matched to a stock. One row per (link, symbol).
+CREATE TABLE IF NOT EXISTS news (
+    link        TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    source      TEXT,
+    published   TEXT,                          -- YYYY-MM-DD HH:MM, Colombo
+    feed        TEXT NOT NULL,                 -- google, economynext, dailymirror
+    fetched_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (link, symbol)
+);
+
 -- Named sets of settings you chose to keep, e.g. "Default", "Wide stops".
 CREATE TABLE IF NOT EXISTS settings_presets (
     name         TEXT PRIMARY KEY,
@@ -135,7 +184,7 @@ DEFAULT_SETTINGS = {
 }
 
 # Columns added after a database may already exist: (table, column, type).
-MIGRATIONS = [("position_settings", "stop_entry_day", "TEXT")]
+MIGRATIONS = [("position_settings", "stop_entry_day", "TEXT"), ("fundamentals", "nav_report_day", "TEXT")]
 
 
 def connect(path: Path) -> sqlite3.Connection:
