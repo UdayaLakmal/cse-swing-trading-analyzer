@@ -101,12 +101,20 @@
     </div>
   </div>
   <div>
-    <div class="section-head"><h2>News</h2><span class="hint">last 3 weeks · matched by company name</span></div>
+    <div class="section-head"><h2>News</h2><span class="hint">last 3 weeks · Sri Lankan outlets · matched by company name</span></div>
     <div class="card">
       {% for n in news %}
       <div class="evt"><span class="d">{{ (n.published or n.fetched_at)[:10] }}</span><a class="s" href="/stock/{{ n.symbol }}">{{ n.symbol.split('.')[0] }}</a>
         <span class="t"><a href="{{ n.link }}" target="_blank" rel="noopener">{{ n.title }}</a> <span class="faint small">{{ n.source or '' }}</span></span></div>
       {% else %}<div class="empty small">No headlines yet. News is fetched with the daily run.</div>{% endfor %}
+    </div>
+
+    <div class="section-head" style="margin-top:20px"><h2>Market news</h2><span class="hint">last week · round-ups naming many stocks</span></div>
+    <div class="card">
+      {% for n in market_news %}
+      <div class="evt"><span class="d">{{ (n.published or n.fetched_at)[:10] }}</span>
+        <span class="t"><a href="{{ n.link }}" target="_blank" rel="noopener">{{ n.title }}</a> <span class="faint small">{{ n.source or '' }}</span></span></div>
+      {% else %}<div class="empty small">No market round-ups this week.</div>{% endfor %}
     </div>
   </div>
 </div>

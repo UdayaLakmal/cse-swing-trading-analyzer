@@ -214,11 +214,13 @@ def test_aliases_and_matching():
 RSS = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
 <item><title>Hayleys profit up 20pct</title><link>https://x/1</link><pubDate>{d}</pubDate><description>Hayleys PLC said</description></item>
 <item><title>Rupee steady</title><link>https://x/2</link><pubDate>{d}</pubDate></item>
+<item><title>Indices close in green</title><link>https://x/4</link><pubDate>{d}</pubDate><description>Hayleys and John Keells Holdings led turnover</description></item>
 <item><title>Old Hayleys story</title><link>https://x/3</link><pubDate>Mon, 01 Jan 2024 08:00:00 GMT</pubDate></item>
 </channel></rss>"""
 GNEWS = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>g</title>
 <item><title>Dipped Products buys stake - EconomyNext</title><link>https://g/1</link><pubDate>{d}</pubDate><source url="https://economynext.com">EconomyNext</source></item>
 <item><title>Dipped Products PLC (DIPD) stock price - Yahoo Finance</title><link>https://g/2</link><pubDate>{d}</pubDate><source url="https://yahoo.com">Yahoo Finance</source></item>
+<item><title>Dipped Products Zambia unit opens - News Diggers!</title><link>https://g/4</link><pubDate>{d}</pubDate><source url="https://diggers.news">News Diggers!</source></item>
 <item><title>Colombo stocks close higher - Daily FT</title><link>https://g/3</link><pubDate>{d}</pubDate><source url="https://ft.lk">Daily FT</source></item>
 </channel></rss>"""
 
@@ -237,12 +239,31 @@ def test_collect_news(tmp_path):
     with httpx.Client(transport=httpx.MockTransport(handler)) as http:
         st = news.collect_news(c, ["DIPD.N0000"], delay_s=0, http=http)
     assert st["feeds"] == 2 and st["searches"] == 1 and st["failed"] == 0
+    assert st["dropped_sites"] == 1
     rows = {(r["symbol"], r["title"], r["source"]) for r in news.latest(c)}
     # Both mocked feeds carry the same link: stored once per stock. The quote
-    # page and the headline that does not name the company are dropped.
+    # page, the foreign site, the round-up and the headline that does not name
+    # the company are not company news.
     assert rows == {("HAYL.N0000", "Hayleys profit up 20pct", "EconomyNext"),
                     ("DIPD.N0000", "Dipped Products buys stake", "EconomyNext")}
+    assert [r["title"] for r in news.latest(c, [news.MARKET])] == ["Indices close in green"]
     assert news.latest(c, []) == []
+
+
+def test_trusted_sites_and_roundups():
+    for url in ["https://www.ft.lk", "https://economynext.com", "https://bizenglish.adaderana.lk",
+                "http://island.lk", "https://www.colombogazette.com"]:
+        assert news.trusted_site(url), url
+    for url in ["https://diggers.news", "https://www.tradingview.com", "https://www.businesstoday.com.my",
+                "https://notlk.com", None, ""]:
+        assert not news.trusted_site(url), url
+    for t in ["Indices close in green", "Sri Lanka stocks trend lower; Materials lead turnover",
+              "ASPI gains 50 points", "CSE shares end mixed", "Colombo bourse edges up"]:
+        assert news.is_roundup(t), t
+    for t in ["Sri Lanka Bairaha Farms Sept quarter profit down 50-pct", "Hayleys Fabric opens new plant",
+              "Dialog Axiata signs MoU with IIT Madras"]:
+        assert not news.is_roundup(t), t
+    assert news.is_roundup("Three firms sign deal", companies=3)
 
 
 # --- pages -----------------------------------------------------------------------------

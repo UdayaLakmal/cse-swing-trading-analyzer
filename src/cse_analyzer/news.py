@@ -4,8 +4,11 @@ Two kinds of source:
 
 * business RSS feeds (EconomyNext, Daily Mirror Business), matched against
   every listed company's name;
-* a Google News search per holding and watchlist stock.
+* a Google News search per holding and watchlist stock, keeping only results
+  from Sri Lankan outlets (see `trusted_site`).
 
+Market round-ups ("Indices close in green") name many companies in passing;
+they are saved once under the symbol MARKET instead of against each stock.
 Matching is by company name, so expect some noise. Headlines are context
 only: they never change a verdict.
 """
@@ -18,7 +21,7 @@ import sqlite3
 import time
 from calendar import timegm
 from datetime import datetime, timedelta
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 import feedparser
 import httpx
@@ -32,6 +35,7 @@ FEEDS = {
     "dailymirror": "https://www.dailymirror.lk/rss/business/215",
 }
 GOOGLE = "https://news.google.com/rss/search?q={q}&hl=en-LK&gl=LK&ceid=LK:en"
+MARKET = "MARKET"
 KEEP_DAYS = 120
 MAX_AGE_DAYS = 45
 
@@ -51,6 +55,16 @@ VAGUE = SUFFIXES | {"BANK", "FINANCE", "CAPITAL", "INSURANCE", "LIFE", "GENERAL"
 NOISE = re.compile(r"stock price|share price|seasonal returns|estimates|quote|stock forecast|dividend history"
                    r"|price target|chart|financials? \(|annual report|stock analysis|\bvaluation\b|overview",
                    re.I)
+# Google News results are kept only from these sites: any .lk domain, plus
+# Sri Lankan outlets on .com. Foreign sites write about a group's overseas
+# businesses (LOLC Zambia, Axiata Malaysia), and quote sites are not news.
+LK_SITES = {"economynext.com", "colombogazette.com", "lankabusinessonline.com", "lankabusinessnews.com"}
+# A headline about the whole market, not a company.
+ROUNDUP = re.compile(r"\bindices\b|\bASPI\b|S&P\s*SL\s*20|\bbourse\b|\bmarket (close|end|open)s?\b"
+                     r"|\b(sri lanka|colombo|cse|lankan?)\b.{0,25}\b(stocks|shares|equities|equity market)\b"
+                     r"|\b(stocks|shares|equities)\b.{0,25}\b(close|end|trend|edge|gain|fall|rise|dip|slip|climb"
+                     r"|open|up|down|higher|lower|flat|mixed)", re.I)
+ROUNDUP_MIN_COMPANIES = 3
 NOISE_SOURCES = {"yahoo finance", "yahoo finance uk", "tradingview", "marketscreener", "investing.com",
                  "simply wall st", "stockanalysis", "macrotrends", "wsj", "morningstar", "marketwatch",
                  "globaldata", "craft.co", "pitchbook", "zoominfo", "magzter"}
@@ -133,17 +147,30 @@ def parse_feed(content: bytes, feed: str) -> list[dict]:
         link, title = e.get("link"), (e.get("title") or "").strip()
         if not link or not title:
             continue
-        src = (e.get("source") or {}).get("title") if feed == "google" else {
+        src_info = e.get("source") or {}
+        src = src_info.get("title") if feed == "google" else {
             "economynext": "EconomyNext", "dailymirror": "Daily Mirror"}.get(feed, feed)
+        site = src_info.get("href") if feed == "google" else FEEDS.get(feed)
         summary = re.sub(r"<[^>]+>", " ", e.get("summary") or "")
         out.append({"link": link, "title": _strip_source(title, src), "source": src,
-                    "published": _published(e), "summary": summary, "feed": feed})
+                    "published": _published(e), "summary": summary, "feed": feed, "site": site})
     return out
 
 
 def is_noise(item: dict) -> bool:
     src = (item.get("source") or "").lower()
     return bool(NOISE.search(item["title"])) or any(n in src for n in NOISE_SOURCES)
+
+
+def trusted_site(url: str | None) -> bool:
+    """True for a Sri Lankan news site."""
+    host = (urlparse(url or "").hostname or "").lower().removeprefix("www.")
+    return bool(host) and (host.endswith(".lk") or host in LK_SITES
+                           or any(host.endswith("." + d) for d in LK_SITES))
+
+
+def is_roundup(title: str, companies: int = 0) -> bool:
+    return bool(ROUNDUP.search(title)) or companies >= ROUNDUP_MIN_COMPANIES
 
 
 def fresh(item: dict, now: datetime) -> bool:
@@ -174,7 +201,7 @@ def collect_news(conn: sqlite3.Connection, tracked: list[str], *, delay_s: float
     http = http or httpx.Client(timeout=20, follow_redirects=True,
                                 headers={"User-Agent": "Mozilla/5.0 (compatible; cse-analyzer/0.1)"})
     found: list[tuple[str, dict]] = []
-    stats = {"feeds": 0, "searches": 0, "failed": []}
+    stats = {"feeds": 0, "searches": 0, "failed": [], "roundups": 0, "dropped_sites": 0}
     try:
         for feed, url in FEEDS.items():
             try:
@@ -185,9 +212,16 @@ def collect_news(conn: sqlite3.Connection, tracked: list[str], *, delay_s: float
                 stats["failed"].append(feed)
                 continue
             for it in items:
-                if fresh(it, now):
-                    for sym in matcher.match(it["title"] + " " + it["summary"]):
-                        found.append((sym, it))
+                if not fresh(it, now) or is_noise(it):
+                    continue
+                syms = matcher.match(it["title"] + " " + it["summary"])
+                if not syms:
+                    continue
+                if is_roundup(it["title"], len(syms)):
+                    found.append((MARKET, it))
+                    stats["roundups"] += 1
+                else:
+                    found.extend((sym, it) for sym in syms)
         for sym in tracked:
             al = aliases(names.get(sym, ""))
             if not al:
@@ -205,7 +239,10 @@ def collect_news(conn: sqlite3.Connection, tracked: list[str], *, delay_s: float
             for it in items:
                 # Google also matches the body, so keep only headlines that
                 # name this company (not a sister one) or its ticker.
-                if not fresh(it, now) or is_noise(it):
+                if not fresh(it, now) or is_noise(it) or is_roundup(it["title"]):
+                    continue
+                if not trusted_site(it.get("site")):
+                    stats["dropped_sites"] += 1
                     continue
                 if sym in matcher.match(it["title"]) or re.search(rf"\b{re.escape(base)}\b", it["title"]):
                     found.append((sym, it))
@@ -218,9 +255,14 @@ def collect_news(conn: sqlite3.Connection, tracked: list[str], *, delay_s: float
 
 
 def latest(conn, symbols: list[str] | None = None, *, days: int = 30, limit: int = 50) -> list[dict]:
+    """Company headlines (all stocks, or `symbols`). Market round-ups are
+    left out; pass [MARKET] to get those."""
     since = (datetime.now(COLOMBO) - timedelta(days=days)).strftime("%Y-%m-%d")
     q = "SELECT * FROM news WHERE COALESCE(published, fetched_at) >= ?"
     args: list = [since]
+    if symbols is None:
+        q += " AND symbol != ?"
+        args.append(MARKET)
     if symbols is not None:
         if not symbols:
             return []

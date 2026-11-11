@@ -78,7 +78,7 @@ see [docs/cse-api.md](docs/cse-api.md).
 - `src/cse_analyzer/db.py` – SQLite schema and default settings (10% stop, 3x ATR trail, 1.12% fees…)
 - `src/cse_analyzer/cli.py` – `cse backfill | daily | weekly | news | analyze | status | summary`
 - `src/cse_analyzer/fundamentals.py` – dividends, NAV from report PDFs, market ratios, valuation grade, events
-- `src/cse_analyzer/news.py` – RSS feeds and Google News, company-name matching
+- `src/cse_analyzer/news.py` – RSS feeds and Google News (Sri Lankan sites only), company-name matching, market round-ups
 - `src/cse_analyzer/notify.py` – the daily notification text
 - `scripts/cse-daily.sh`, `scripts/install-timer.sh`, `deploy/systemd/` – timer, run script, notification
 - `src/cse_analyzer/trades.py` – symbol matching, paste and .xlsx parsing, duplicate-safe saving
@@ -173,10 +173,13 @@ and P/BV score +1 at ≤ 75% of the market's and -1 at ≥ 150%, a yield at leas
 
 News comes daily from EconomyNext and Daily Mirror Business (matched against
 every listed company's name) and from a Google News search per holding and
-watchlist stock. Names are matched longest first, so "John Keells Hotels" is
-not taken for John Keells Holdings; quote pages (Yahoo, TradingView,
-MarketScreener…) are dropped. Expect some noise: market wrap-ups mention many
-companies.
+watchlist stock. Google results are kept only from Sri Lankan outlets (any
+`.lk` site, plus EconomyNext, Colombo Gazette and Lanka Business Online), so
+foreign stories about a group's overseas businesses and quote pages (Yahoo,
+TradingView, MarketScreener…) are dropped. Names are matched longest first, so
+"John Keells Hotels" is not taken for John Keells Holdings. Market round-ups
+("Indices close in green") are saved once as market news, shown separately on
+the Fundamentals page, instead of against every stock they mention.
 
 None of this changes a verdict. It appears as **context** under it: the
 valuation, an ex-dividend date in the next 10 days (the price drops by about the

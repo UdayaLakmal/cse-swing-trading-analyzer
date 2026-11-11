@@ -238,7 +238,7 @@ def fundamentals_page(request: Request, conn=Depends(get_conn)):
                     key=lambda x: x[1]["day"], reverse=True)[:25]
     return render(request, "fundamentals.html", conn, active="fundamentals", rows=rows, market=fundamentals.market(conn),
                   upcoming=upcoming, recent=recent, news=news.latest(conn, syms, days=21, limit=40),
-                  run=dict(run) if run else None, names=names)
+                  market_news=news.latest(conn, [news.MARKET], days=7, limit=8), run=dict(run) if run else None, names=names)
 
 
 def _num_or_none(text: str, *, positive: bool = False) -> float | None:
