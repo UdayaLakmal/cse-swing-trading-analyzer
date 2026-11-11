@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from . import analysis, collector
+from . import analysis, collector, fundamentals
 
 ACTION_VERDICTS = ("Sell", "Trim", "Add")
 
@@ -40,6 +40,10 @@ def build_summary(conn: sqlite3.Connection) -> dict:
         lines.append(f"Enter (watchlist): {_short(enter_watch)}")
     if held and not any(by.values()):
         lines.append(f"All {len(held)} holdings are Hold")
+    xd = fundamentals.upcoming_xd(conn, [x["symbol"] for x in held], within_days=7)
+    if xd:
+        lines.append("Ex-dividend soon: " + ", ".join(
+            f"{s.split('.')[0]} {d['xd'][8:10]}/{d['xd'][5:7]}" for s, d in sorted(xd.items(), key=lambda kv: kv[1]["xd"])))
     regime = analysis.market_regime(conn)
     market = "ASPI uptrend" if regime["ok"] else "ASPI downtrend, buys on hold"
     lines.append(f"{enter_scan} market idea{'s' if enter_scan != 1 else ''} · {market}" if regime.get("known")

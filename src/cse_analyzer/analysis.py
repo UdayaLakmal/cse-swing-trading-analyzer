@@ -92,6 +92,8 @@ class Signal:
     features: Features | None = None
     rule: str = ""  # which verdict rule decided (HOLDING_RULES / ENTRY_RULES)
     checks: dict[str, bool] = field(default_factory=dict)  # entry checks and whether each passed
+    context: list[str] = field(default_factory=list)  # fundamentals and events; never change the verdict
+    valuation: str | None = None  # Cheap ... Expensive, from fundamentals.grade
 
 
 def _f(x) -> float | None:
@@ -405,6 +407,8 @@ def run_analysis(conn: sqlite3.Connection) -> dict:
         sig.components, sig.features = comps, f
         signals.append(sig)
 
+    add_context(conn, signals)
+
     for sym in set(held) | set(watch):
         if sym not in feats:
             name = held[sym].name if sym in held else sym
@@ -421,6 +425,7 @@ def run_analysis(conn: sqlite3.Connection) -> dict:
               json.dumps({"reasons": x.reasons, "components": [asdict(c) for c in x.components],
                           "stop_stage": x.stop_stage, "size_shares": x.size_shares, "name": x.name,
                           "change_pct": x.change_pct, "bar_day": x.day, "rule": x.rule, "checks": x.checks,
+                          "context": x.context, "valuation": x.valuation,
                           "features": asdict(x.features) if x.features else None}))
              for x in signals],
         )
@@ -430,6 +435,44 @@ def run_analysis(conn: sqlite3.Connection) -> dict:
         if x.list != "scan":
             counts[f"{x.list}:{x.verdict}"] = counts.get(f"{x.list}:{x.verdict}", 0) + 1
     return {"day": day, "analysed": len(feats), "regime_ok": regime["ok"], "counts": counts}
+
+
+def add_context(conn, signals: list[Signal]) -> None:
+    """Fundamentals and company events for holdings, the watchlist and Enter
+    ideas. Context only: the verdict stays as the price rules decided."""
+    from . import fundamentals as fu
+
+    picked = [x for x in signals if x.list != "scan" or x.verdict == "Enter"]
+    if not picked:
+        return
+    syms = [x.symbol for x in picked]
+    vals = fu.valuations(conn, {x.symbol: x.close for x in picked})
+    xds = fu.upcoming_xd(conn, syms)
+    evs = fu.events(conn, syms, days=21)
+    for x in picked:
+        v = vals.get(x.symbol)
+        if v and v["grade"] != "Unknown":
+            x.valuation = v["grade"]
+            bits = []
+            if v["pe"] is not None:
+                bits.append("loss-making" if v["loss"] else f"P/E {v['pe']:.1f}")
+            if v["pbv"] is not None and not v["suspect"]:
+                bits.append(f"P/BV {v['pbv']:.2f}")
+            if v["dy"]:
+                bits.append(f"yield {v['dy']:.1f}%")
+            x.context.append(f"Valuation: {v['grade'].lower()}" + (f" ({', '.join(bits)})" if bits else ""))
+        xd = xds.get(x.symbol)
+        if xd:
+            pct = 100 * xd["dps"] / x.close if x.close else 0
+            line = f"Goes ex-dividend on {xd['xd']} (Rs {xd['dps']:g} a share, {pct:.1f}% of the price)"
+            if x.list == "holding":
+                line += ": the price usually drops by about that much that day, which can touch a tight stop"
+            x.context.append(line)
+        seen = {"Dividend"}  # covered by the ex-dividend line
+        for e in evs.get(x.symbol, []):  # newest first
+            if e["important"] and not e.get("upcoming") and e["label"] not in seen:
+                seen.add(e["label"])
+                x.context.append(f"{e['label']} announced on {e['day']}: check the announcement before acting")
 
 
 def load_signals(conn, day: str | None = None) -> tuple[str | None, list[dict]]:

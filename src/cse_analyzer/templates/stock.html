@@ -40,6 +40,8 @@
     <h2 style="margin-bottom:10px">Verdict{% if sig %}: {{ sig.verdict }}{% endif %}</h2>
     {% if sig %}
     <ul class="reasons">{% for r in sig.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+    {% if sig.context %}<div class="small faint" style="margin-top:10px; text-transform:uppercase; letter-spacing:.04em; font-weight:600">Context (does not change the verdict)</div>
+    <ul class="reasons muted">{% for r in sig.context %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}
     <div class="stats" style="margin-top:14px">
       <div><div class="k">{{ (sig.stop_stage or 'stop')|capitalize }} stop</div><div class="v">{{ sig.stop|money }}</div></div>
       <div><div class="k">Target</div><div class="v">{{ sig.target|money }}</div></div>
@@ -92,14 +94,47 @@
 </div>
 {% endif %}
 
+{% set gclass = {'Cheap': 'b-enter', 'Leans cheap': 'b-enter', 'Leans expensive': 'b-wait', 'Expensive': 'b-sell'} %}
+<div class="grid2 section">
+  <div class="card pad">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px"><h2>Fundamentals</h2>
+      {% if val %}<span class="badge {{ gclass.get(val.grade, '') }}">{{ val.grade }}</span>{% endif %}</div>
+    {% if val %}
+    <div class="stats" style="margin-top:12px">
+      <div><div class="k">P/E</div><div class="v">{% if val.loss %}<span class="neg">loss</span>{% elif val.pe is not none %}{{ val.pe|money(1) }}{% else %}–{% endif %}</div>
+        <div class="small muted">{% if val.eps is not none %}EPS {{ val.eps|money }} (yours){% else %}<a href="/fundamentals">enter EPS</a>{% endif %}</div></div>
+      <div><div class="k">P/BV</div><div class="v">{{ val.pbv|money(2) if val.pbv is not none else '–' }}{{ ' ⚠' if val.suspect }}</div>
+        <div class="small muted">{% if val.nav %}NAV {{ val.nav|money }} ({{ 'yours' if val.nav_from == 'manual' else 'report' }}){% else %}no NAV yet{% endif %}</div></div>
+      <div><div class="k">Dividend yield</div><div class="v">{{ (val.dy|money(1) ~ '%') if val.dy is not none else '–' }}</div>
+        <div class="small muted">Rs {{ val.dps|money }} in 12 months</div></div>
+      {% if val.market %}<div><div class="k">Market</div><div class="v small">P/E {{ val.market.per|money(1) }} · P/BV {{ val.market.pbv|money(2) }} · {{ val.market.dy|money(1) }}%</div></div>{% endif %}
+    </div>
+    {% if val.points %}<ul class="reasons" style="margin-top:12px">{% for t, p in val.points %}<li><b class="{{ 'pos' if p > 0 else ('neg' if p < 0 else 'muted') }}">{{ '%+d'|format(p) }}</b> {{ t }}</li>{% endfor %}</ul>{% endif %}
+    <p class="small muted" style="margin-bottom:0">{% if val.nav_source %}Net assets from <a href="{{ val.nav_source }}" target="_blank" rel="noopener">{{ val.nav_period or 'the latest report' }}</a>{% if val.old_report %} <span class="neg">(old report)</span>{% endif %}. {% endif %}<a href="/fundamentals">Edit figures →</a></p>
+    {% else %}<p class="muted small">No prices stored.</p>{% endif %}
+  </div>
+
+  <div>
+    <div class="section-head"><h2>Announcements</h2><span class="hint">last 13 months</span></div>
+    <div class="card">
+      {% for e in events %}
+      <div class="comp" style="padding:9px 14px"><span>{% if e.important %}<b style="color:var(--warn)">{{ e.label }}</b>{% else %}{{ e.label }}{% endif %}{% if e.title %} · {% if e.url %}<a href="{{ e.url }}" target="_blank" rel="noopener">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}{% endif %}</span>
+        <span class="small muted" style="white-space:nowrap">{{ 'on ' if e.upcoming }}{{ e.day }}</span></div>
+      {% else %}
+      <div class="empty small">No announcements stored. They are fetched weekly for holdings and watchlist stocks.</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
 <div class="grid2 section">
   <div>
-    <div class="section-head"><h2>Announcements</h2></div>
+    <div class="section-head"><h2>News</h2><span class="hint">matched by company name</span></div>
     <div class="card">
-      {% for n in news %}
-      <div class="comp" style="padding:10px 14px"><span>{% if n.url %}<a href="{{ n.url }}" target="_blank" rel="noopener">{{ n.title }}</a>{% else %}{{ n.title }}{% endif %}</span><span class="small muted">{{ n.announced }}</span></div>
+      {% for n in headlines %}
+      <div class="comp" style="padding:9px 14px"><span><a href="{{ n.link }}" target="_blank" rel="noopener">{{ n.title }}</a> <span class="faint small">{{ n.source or '' }}</span></span><span class="small muted" style="white-space:nowrap">{{ (n.published or n.fetched_at)[:10] }}</span></div>
       {% else %}
-      <div class="empty small">No announcements stored for this company yet.</div>
+      <div class="empty small">No recent headlines found for this company.</div>
       {% endfor %}
     </div>
   </div>

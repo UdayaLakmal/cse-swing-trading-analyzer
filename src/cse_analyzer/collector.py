@@ -102,22 +102,42 @@ def upsert_index(conn: sqlite3.Connection, code: str, points: list[IndexPoint], 
     return len(by_day)
 
 
-def upsert_announcements(conn: sqlite3.Connection, kind: str, items: list[dict]) -> int:
+def norm_name(name: str | None) -> str:
+    """Company names differ in spacing and punctuation between endpoints."""
+    import re
+
+    return re.sub(r"[^A-Z0-9]+", " ", (name or "").upper()).strip()
+
+
+def base_by_name(conn: sqlite3.Connection) -> dict[str, str]:
+    """Normalised company name -> base symbol (JKH), preferring the voting share."""
+    out: dict[str, str] = {}
+    for sym, name in conn.execute("SELECT symbol, name FROM stocks ORDER BY symbol DESC"):
+        out[norm_name(name)] = sym.split(".")[0]
+    return out
+
+
+def upsert_announcements(conn: sqlite3.Connection, kind: str, items: list[dict], base: str | None = None) -> int:
+    """Store announcements. Approved ones carry only a company name, so the
+    symbol is looked up by name (or given, when fetched per company)."""
+    names = base_by_name(conn) if kind == "approved" and base is None else {}
     rows = []
     for a in items:
         if a.get("id") is None:
             continue
         if kind == "financial":
             title, category, announced = a.get("fileText"), "FINANCIAL", a.get("uploadedDate")
-            company, url = a.get("name"), (CSE_FILE_BASE + a["path"]) if a.get("path") else None
+            company, url, sym = a.get("name"), (CSE_FILE_BASE + a["path"]) if a.get("path") else None, a.get("symbol")
         else:
-            title = category = a.get("announcementCategory")
+            title = category = (a.get("announcementCategory") or "").strip()
             announced, company, url = a.get("dateOfAnnouncement"), a.get("company"), None
-        rows.append((a["id"], kind, company, a.get("symbol"), category, title, announced, url, json.dumps(a)))
+            sym = base or a.get("symbol") or names.get(norm_name(company))
+        rows.append((a["id"], kind, company, sym, category, title, announced, url, json.dumps(a)))
     conn.executemany(
-        """INSERT OR IGNORE INTO announcements
+        """INSERT INTO announcements
            (id, kind, company, symbol, category, title, announced, url, raw_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET symbol = COALESCE(announcements.symbol, excluded.symbol)""",
         rows,
     )
     return len(rows)

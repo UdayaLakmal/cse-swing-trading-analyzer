@@ -83,6 +83,18 @@ if echo "$out" | grep -q "already ran for"; then
   exit 0
 fi
 
+# Fundamentals once a week (the command skips itself if it ran in the last
+# 6 days). A failure here only adds a note: the daily verdicts are fine.
+weekly_note=""
+wout=$(docker compose --profile job run --rm -T job weekly 2>&1)
+wrc=$?
+echo "$wout" | tail -n 20
+if [ $wrc -ne 0 ]; then
+  log "warning: weekly fundamentals failed (exit $wrc)"
+  weekly_note="
+Weekly fundamentals fetch failed; see the run log."
+fi
+
 summary=$(docker compose --profile job run --rm -T job summary 2>/dev/null | tail -n 1)
 field() { python3 -c 'import json,sys; print(json.loads(sys.argv[1])[sys.argv[2]])' "$summary" "$1" 2>/dev/null; }
 title=$(field title) || fail "Could not read the summary: $summary"
@@ -92,5 +104,6 @@ if echo "$out" | grep -q '"status": "partial"'; then
   body="$body
 Some stocks failed to download; see the run log."
 fi
+body="$body$weekly_note"
 log "$title"
 notify "${urgency:-normal}" "$title" "$body"

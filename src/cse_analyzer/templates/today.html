@@ -47,6 +47,7 @@
     <div class="card action v-{{ vclass(a.verdict) }}">
       <div class="top"><div><a class="sym" href="/stock/{{ a.symbol }}">{{ a.symbol.split('.')[0] }}</a> <span class="muted small">{{ 'holding' if a.list == 'holding' else 'watchlist' }}</span></div>{{ badge(a.verdict) }}</div>
       <div class="why">{{ a.reasons[0] }}</div>
+      {% for c in a.context or [] %}<div class="small muted" style="margin-top:4px">ⓘ {{ c }}</div>{% endfor %}
       <div class="meta">
         <span>Close <b>{{ a.close|money }}</b></span>
         {% if a.stop %}<span>Stop <b>{{ a.stop|money }}</b></span>{% endif %}
@@ -108,6 +109,30 @@
   </table></div>
   {% else %}
   <div class="card empty"><b>Your watchlist is empty</b>Add stocks from the <a href="/scan">market scan</a> or any stock page to get Enter / Wait / Avoid calls.</div>
+  {% endif %}
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>News &amp; events</h2><a class="hint" href="/fundamentals">Fundamentals &amp; news →</a></div>
+  {% if coming or lately or headlines %}
+  <div class="grid2">
+    <div class="card">
+      {% for s_, e in coming %}
+      <div class="comp" style="padding:9px 14px"><span><a class="sym" href="/stock/{{ s_ }}">{{ s_.split('.')[0] }}</a> <b style="color:var(--warn)">{{ e.label }}</b> · {{ e.title }}</span><span class="small muted" style="white-space:nowrap">on {{ e.day }}</span></div>
+      {% endfor %}
+      {% for s_, e in lately %}
+      <div class="comp" style="padding:9px 14px"><span><a class="sym" href="/stock/{{ s_ }}">{{ s_.split('.')[0] }}</a> {% if e.important %}<b style="color:var(--warn)">{{ e.label }}</b>{% else %}{{ e.label }}{% endif %}{% if e.title %} · {% if e.url %}<a href="{{ e.url }}" target="_blank" rel="noopener">{{ e.title|truncate(70) }}</a>{% else %}{{ e.title }}{% endif %}{% endif %}</span><span class="small muted" style="white-space:nowrap">{{ e.day }}</span></div>
+      {% endfor %}
+      {% if not coming and not lately %}<div class="empty small">No announcements for your stocks in the last 10 days.</div>{% endif %}
+    </div>
+    <div class="card">
+      {% for n in headlines %}
+      <div class="comp" style="padding:9px 14px"><span><a class="sym" href="/stock/{{ n.symbol }}">{{ n.symbol.split('.')[0] }}</a> <a href="{{ n.link }}" target="_blank" rel="noopener">{{ n.title }}</a></span><span class="small muted" style="white-space:nowrap">{{ (n.published or n.fetched_at)[:10] }}</span></div>
+      {% else %}<div class="empty small">No headlines about your stocks this week.</div>{% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <div class="card empty"><b>Nothing new</b>No announcements or headlines about your holdings or watchlist this week.</div>
   {% endif %}
 </div>
 

@@ -167,3 +167,39 @@ class CseClient:
 
     def financial_announcements(self) -> list[dict]:
         return self._post("getFinancialAnnouncement").get("reqFinancialAnnouncemnets", [])
+
+    def company_announcements(self, symbol: str, from_day: str, to_day: str) -> list[dict]:
+        body = self._post("getAnnouncementByCompany", {"symbol": symbol, "fromDate": from_day, "toDate": to_day})
+        return body.get("reqCompanyAnnouncement") or []
+
+    def announcement_detail(self, announcement_id: int) -> dict:
+        return self._post("getAnnouncementById", {"announcementId": announcement_id}).get("reqBaseAnnouncement") or {}
+
+    def financials(self, symbol: str) -> dict:
+        """Report PDFs for one company: infoQuarterlyData, infoAnnualData."""
+        return self._post("financials", {"symbol": symbol}) or {}
+
+    def weekly_reports(self) -> list[dict]:
+        return self._post("cseWeekly").get("reqCseWeekly") or []
+
+    def download(self, url: str, max_bytes: int = 30_000_000) -> bytes:
+        wait = self._delay - (time.monotonic() - self._last_call)
+        if wait > 0:
+            time.sleep(wait)
+        self._last_call = time.monotonic()
+        try:
+            resp = self._http.get(url, follow_redirects=True)
+            resp.raise_for_status()
+        except httpx.HTTPError as e:
+            raise CseApiError(f"download {url} failed: {e}") from e
+        if len(resp.content) > max_bytes:
+            raise CseApiError(f"download {url}: {len(resp.content)} bytes is too large")
+        return resp.content
+
+
+def file_url(path: str | None) -> str | None:
+    """cdn.cse.lk serves report files under cmt/; older paths omit it."""
+    if not path:
+        return None
+    path = path.lstrip("/")
+    return "https://cdn.cse.lk/" + (path if path.startswith("cmt/") else "cmt/" + path)
