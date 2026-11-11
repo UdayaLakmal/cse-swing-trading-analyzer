@@ -104,6 +104,21 @@ CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL
 );
+
+-- Every saved set of strategy settings, newest last; restorable from the Settings page.
+CREATE TABLE IF NOT EXISTS settings_history (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    saved_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    note         TEXT NOT NULL,
+    values_json  TEXT NOT NULL
+);
+
+-- Named sets of settings you chose to keep, e.g. "Default", "Wide stops".
+CREATE TABLE IF NOT EXISTS settings_presets (
+    name         TEXT PRIMARY KEY,
+    saved_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    values_json  TEXT NOT NULL
+);
 """
 
 DEFAULT_SETTINGS = {

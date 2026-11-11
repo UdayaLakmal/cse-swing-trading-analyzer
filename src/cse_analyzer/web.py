@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from jinja2 import Undefined
 
-from . import analysis, charts, collector, db, strategy
+from . import analysis, charts, collector, db, settings_store, strategy
 from .cli import status
 from .config import load_settings
 from .portfolio import build_portfolio
@@ -424,28 +424,91 @@ SETTINGS_FORM = [
 ]
 
 
+LABELS = {k: label for _, fields in SETTINGS_FORM for k, label, *_ in fields}
+
+
+def _settings_page(request, conn, values=None, errors=None):
+    return render(request, "settings.html", conn, active="settings", form=SETTINGS_FORM,
+                  values=values or settings_store.current(conn), errors=errors or {},
+                  defaults=db.DEFAULT_SETTINGS, limits=settings_store.LIMITS, labels=LABELS,
+                  history=settings_store.history(conn), presets=settings_store.presets(conn),
+                  nice=settings_store.nice, cur=settings_store.current(conn))
+
+
+def _applied(conn, changed: list[str], what: str) -> RedirectResponse:
+    if not changed:
+        return back("/settings", f"{what}: nothing changed")
+    analysis.run_analysis(conn)
+    names = ", ".join(LABELS[k].lower() for k in changed)
+    extra = " Trailing stops were worked out again for the new values." if settings_store.STOP_KEYS & set(changed) else ""
+    return back("/settings", f"{what}: changed {names}. The analysis is refreshed.{extra}")
+
+
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, conn=Depends(get_conn)):
-    return render(request, "settings.html", conn, active="settings", form=SETTINGS_FORM,
-                  values=dict(conn.execute("SELECT key, value FROM settings").fetchall()))
+    return _settings_page(request, conn)
 
 
 @app.post("/settings")
 async def settings_save(request: Request, conn=Depends(get_conn)):
-    form = await request.form()
-    keys = [k for _, fields in SETTINGS_FORM for k, *_ in fields]
-    for k in keys:
-        raw = str(form.get(k, "")).strip()
-        try:
-            v = float(raw)
-        except ValueError:
-            return back("/settings", f"'{raw}' is not a number")
-        if v < 0:
-            return back("/settings", "Values cannot be negative")
-        conn.execute("UPDATE settings SET value = ? WHERE key = ?", (f"{v:g}", k))
-    conn.commit()
-    analysis.run_analysis(conn)
-    return back("/settings", "Settings saved and the analysis refreshed")
+    form = {k: str(v) for k, v in (await request.form()).items()}
+    values, errors = settings_store.validate(form)
+    if errors:
+        page = _settings_page(request, conn, values=form, errors=errors)
+        page.status_code = 400
+        return page
+    return _applied(conn, settings_store.save(conn, values, "Saved on the Settings page"), "Settings saved")
+
+
+@app.post("/settings/reset")
+def settings_reset(conn=Depends(get_conn)):
+    changed, _ = settings_store.restore(conn, dict(db.DEFAULT_SETTINGS), "Reset to defaults")
+    return _applied(conn, changed, "Reset to defaults")
+
+
+@app.post("/settings/restore/{snap_id}")
+def settings_restore(snap_id: int, conn=Depends(get_conn)):
+    values = settings_store.snapshot_values(conn, snap_id)
+    if values is None:
+        raise HTTPException(404, "No such saved version")
+    changed, errors = settings_store.restore(conn, values, f"Restored the version from #{snap_id}")
+    if errors:
+        return back("/settings", "That version has values outside today's limits: " + "; ".join(errors.values()))
+    return _applied(conn, changed, f"Restored version #{snap_id}")
+
+
+@app.post("/settings/presets")
+def preset_save(name: str = Form(...), conn=Depends(get_conn)):
+    name = " ".join(name.split())[:40]
+    if not name:
+        return back("/settings", "Give the preset a name")
+    settings_store.save_preset(conn, name)
+    return back("/settings", f"Current settings saved as “{name}”")
+
+
+@app.post("/settings/presets/load")
+def preset_load(name: str = Form(...), conn=Depends(get_conn)):
+    values = settings_store.preset_values(conn, name)
+    if values is None:
+        raise HTTPException(404, "No such preset")
+    changed, errors = settings_store.restore(conn, values, f"Loaded preset “{name}”")
+    if errors:
+        return back("/settings", f"“{name}” has values outside today's limits: " + "; ".join(errors.values()))
+    return _applied(conn, changed, f"Loaded “{name}”")
+
+
+@app.post("/settings/presets/delete")
+def preset_delete(name: str = Form(...), conn=Depends(get_conn)):
+    settings_store.delete_preset(conn, name)
+    return back("/settings", f"Deleted preset “{name}”")
+
+
+@app.get("/settings/export.json")
+def settings_export(conn=Depends(get_conn)):
+    body = json.dumps({"settings": settings_store.current(conn), "defaults": db.DEFAULT_SETTINGS,
+                       "presets": settings_store.presets(conn)}, indent=2, ensure_ascii=False)
+    return Response(body, media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="cse-settings-{date.today()}.json"'})
 
 
 # --- API -------------------------------------------------------------------
